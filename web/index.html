@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>项目打包客户端</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- ================================================================
+     Toast 消息容器
+     ================================================================ -->
+<div id="toastContainer" class="toast-container"></div>
+
+<!-- ================================================================
+     登录页
+     ================================================================ -->
+<div id="loginPage">
+    <div class="login-card">
+        <h2>项目打包客户端</h2>
+        <p class="subtitle">请输入账号密码登录后继续</p>
+
+        <div class="form-group">
+            <label>账号</label>
+            <input type="text" id="loginUsername" class="form-input" placeholder="账号" autocomplete="username">
+        </div>
+        <div class="form-group">
+            <label>密码</label>
+            <input type="password" id="loginPassword" class="form-input" placeholder="密码" autocomplete="current-password">
+        </div>
+        <div class="form-group">
+            <label class="select-all-label">
+                <input type="checkbox" id="loginRemember" checked>
+                记住账号密码
+            </label>
+        </div>
+        <button id="loginButton" class="btn btn-primary" style="width:100%; margin-top: 8px;">登录</button>
+    </div>
+</div>
+
+<!-- ================================================================
+     主页面
+     ================================================================ -->
+<div id="mainPage">
+    <!-- Header -->
+    <div class="app-header">
+        <h1>项目打包工作台</h1>
+        <span class="subtitle">三栏联动选择项目、版本与服务组件</span>
+    </div>
+
+    <!-- Three-column splitter -->
+    <div class="splitter">
+
+        <!-- ============ 左栏：项目管理 ============ -->
+        <div class="card splitter-panel">
+            <h3>项目管理</h3>
+            <input type="text" id="projectSearch" class="form-input search-input"
+                   placeholder="搜索项目...">
+
+            <div class="pivot">
+                <button id="pivotFav" class="pivot-btn active">我的收藏</button>
+                <button id="pivotAll" class="pivot-btn">全量项目</button>
+            </div>
+
+            <div id="favoriteList" class="list-scroll"></div>
+            <div id="allProjectList" class="list-scroll hidden"></div>
+            <div id="projectPagination" class="project-pagination hidden">
+                <button id="projectPrevPage" class="btn btn-sm">上一页</button>
+                <span id="projectPageInfo" class="muted">第 1 / 1 页，共 0 个项目</span>
+                <button id="projectNextPage" class="btn btn-sm">下一页</button>
+            </div>
+        </div>
+
+        <div class="splitter-handle" data-handle="0" role="separator" aria-orientation="vertical" tabindex="0"></div>
+
+        <!-- ============ 中栏：版本选择 ============ -->
+        <div class="card splitter-panel">
+            <h3>版本选择</h3>
+            <p id="versionHint" class="hint">请选择左侧项目</p>
+            <div id="versionList" class="list-scroll"></div>
+        </div>
+
+        <div class="splitter-handle" data-handle="1" role="separator" aria-orientation="vertical" tabindex="0"></div>
+
+        <!-- ============ 右栏：组件配置与打包 ============ -->
+        <div id="rightPanel" class="card splitter-panel right-panel">
+            <div id="rightPanelLoading" class="right-panel-loading hidden" aria-live="polite">
+                <div class="right-panel-loading-content">
+                    <div class="right-panel-spinner"></div>
+                    <span id="rightPanelLoadingText">组件加载中...</span>
+                </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-shrink:0;">
+                <h3 style="margin-bottom:0;">组件配置与打包</h3>
+                <p id="packageHint" class="hint" style="margin-bottom:0;">请选择中间栏版本</p>
+                <div id="moduleLoading" class="loading-ring hidden"></div>
+            </div>
+
+            <!-- 全局参数 -->
+            <div class="form-card">
+                <h4>全局参数</h4>
+                <div class="form-row">
+                    <span class="label">升级包类型</span>
+                    <div class="radio-group">
+                        <label><input type="radio" name="packageType" id="offlineRadio" checked> 离线升级包</label>
+                        <label><input type="radio" name="packageType" id="onlineRadio"> 在线升级包</label>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <span class="label">CPU 架构</span>
+                    <select id="cpuSelect" class="form-select" style="width:130px;">
+                        <option>x86_64</option>
+                        <option>aarch64</option>
+                    </select>
+
+                    <span class="label" style="margin-left:20px;">上传云盘</span>
+                    <span id="seafileToggleWrap" class="toggle-wrap">
+                        <label class="toggle-track">
+                            <input type="checkbox" id="seafileToggle">
+                        </label>
+                    </span>
+                </div>
+                <div class="form-row">
+                    <span class="label">命名空间</span>
+                    <input type="text" id="namespaceInput" class="form-input" value="basic-app" style="width:160px;">
+
+                    <span class="label" style="margin-left:20px;">Apollo 数据库</span>
+                    <input type="text" id="apolloInput" class="form-input" placeholder="IP，留空不启用" style="width:160px;">
+                </div>
+            </div>
+
+            <!-- 业务组件 -->
+            <h4 style="margin-bottom:6px; flex-shrink:0;">业务组件</h4>
+            <div class="module-tools">
+                <label class="select-all-label">
+                    <input type="checkbox" id="selectAllCheckbox" checked>
+                    全选
+                </label>
+                <input type="text" id="moduleSearch" class="form-input search-input"
+                       placeholder="过滤服务...">
+            </div>
+            <div id="moduleList" class="list-scroll flex-fill"></div>
+
+            <!-- 操作按钮 -->
+            <div class="actions-row">
+                <span class="spacer"></span>
+                <button id="cancelButton" class="btn">取消</button>
+                <button id="packButton" class="btn btn-primary" disabled>开始打包</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================================================================
+     通用弹窗
+     ================================================================ -->
+<div id="modalOverlay" class="modal-overlay">
+    <div id="modalBody" class="modal-body">
+        <button id="modalCloseBtn" class="edit-branch-btn"
+                style="position:absolute; top:12px; right:12px;"
+                title="关闭">✕</button>
+    </div>
+</div>
+
+<!-- ================================================================
+     JavaScript
+     ================================================================ -->
+<script src="js/utils.js"></script>
+<script src="js/config.js"></script>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
