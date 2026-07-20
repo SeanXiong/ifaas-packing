@@ -42,6 +42,20 @@ const ConfigStore = {
         }
     },
 
+    async saveLoginProfile(username, password) {
+        const account = String(username || '').trim();
+        const secret = String(password || '');
+        if (!/^[a-zA-Z0-9_-]+$/.test(account) || !secret) {
+            throw new Error('登录账号或密码格式无效。');
+        }
+        const data = await this._read('login-profiles');
+        const accounts = data && data.accounts && typeof data.accounts === 'object'
+            ? data.accounts
+            : {};
+        accounts[account] = { username: account, password: secret };
+        await this._write('login-profiles', { accounts });
+    },
+
     _favoriteAccount(username) {
         const account = String(username || '').trim();
         if (!account) throw new Error('未找到当前登录账号。');

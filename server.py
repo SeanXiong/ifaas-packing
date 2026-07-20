@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
+from socketserver import ThreadingMixIn
 
 ROOT_DIR = Path(__file__).resolve().parent
 WEB_DIR = ROOT_DIR / "web"
@@ -207,6 +208,12 @@ class Handler(SimpleHTTPRequestHandler):
         print(f"[{self.log_date_time_string()}] {fmt % args}", file=sys.stderr)
 
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """每个请求独立处理，避免慢代理请求阻塞其他浏览器请求。"""
+
+    daemon_threads = True
+
+
 def main() -> int:
     config = load_server_config()
     Handler.server_config = config
@@ -225,7 +232,7 @@ def main() -> int:
     mimetypes.add_type("text/html", ".html")
     mimetypes.add_type("image/svg+xml", ".svg")
 
-    server = HTTPServer((host, port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
     print(f"ifaas-packing 本地服务器已启动")
     print(f"  地址：http://{host}:{port}")
     print(f"  后端：{config['backend_url']}")

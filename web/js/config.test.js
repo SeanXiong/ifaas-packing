@@ -44,6 +44,10 @@ vm.runInContext(fs.readFileSync(__dirname + '/config.js', 'utf8'), context);
     assert.deepEqual(JSON.parse(JSON.stringify(profile)), { username: 'alice', password: 'local-password' });
     const missingProfile = await vm.runInContext("ConfigStore.loadLoginProfile('missing')", context);
     assert.equal(missingProfile, null);
+    await vm.runInContext("ConfigStore.saveLoginProfile('alice', 'new-password')", context);
+    await vm.runInContext("ConfigStore.saveLoginProfile('bob', 'bob-password')", context);
+    assert.deepEqual(files['login-profiles'].accounts.alice, { username: 'alice', password: 'new-password' });
+    assert.deepEqual(files['login-profiles'].accounts.bob, { username: 'bob', password: 'bob-password' });
     console.log('PASS: favorites are isolated by login account');
 })().catch(error => {
     console.error(error);

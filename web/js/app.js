@@ -234,6 +234,9 @@ async function doLogin() {
         ApiClient.init(username, password);
         await ApiClient.login();
         saveSessionToken(ApiClient.token, username);
+        ConfigStore.saveLoginProfile(username, password).catch(() => {
+            showError('账号信息保存失败', '本次登录不受影响，但下次无法自动预填账号密码。');
+        });
         hideLoginPage();
         await loadFavoriteProjects();
         showInfo('登录成功', '正在加载项目...');

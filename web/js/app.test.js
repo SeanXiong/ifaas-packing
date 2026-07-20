@@ -8,6 +8,7 @@ const elements = {
     mainPage: { style: {} },
     loginUsername: { value: '' },
     loginPassword: { value: '' },
+    loginButton: { disabled: false, textContent: '登录' },
     loginRemember: { checked: false },
     projectSearch: { value: '' },
     favoriteList: { innerHTML: '' },
@@ -157,8 +158,8 @@ const indexHtml = fs.readFileSync(__dirname + '/../index.html', 'utf8');
 assert.doesNotMatch(indexHtml, /id="seafileToggleWrap" class="[^"]*toggle-on/);
 assert.doesNotMatch(indexHtml, /id="loginRemember"/);
 assert.match(indexHtml, /<link rel="icon" type="image\/svg\+xml" href="favicon\.svg">/);
-assert.match(indexHtml, /<script src="js\/utils\.js\?v=202607201800"><\/script>/);
-assert.match(indexHtml, /<script src="js\/app\.js\?v=202607201800"><\/script>/);
+assert.match(indexHtml, /<script src="js\/utils\.js\?v=202607201900"><\/script>/);
+assert.match(indexHtml, /<script src="js\/app\.js\?v=202607201900"><\/script>/);
 assert.match(indexHtml, /id="userMenuTrigger"/);
 assert.match(indexHtml, /id="logoutButton"/);
 assert.doesNotMatch(indexHtml, /id="offlineRadio"/);
@@ -230,6 +231,23 @@ console.log('PASS: favorite projects use local pagination');
     assert.equal(elements.loginUsername.value, '');
     assert.equal(elements.loginPassword.value, '');
     console.log('PASS: login page never restores another user credentials');
+
+    let savedProfile = null;
+    const realLoadFavoriteProjects = context.loadFavoriteProjects;
+    context.ApiClient.init = () => {};
+    context.ApiClient.login = async () => { context.ApiClient.token = 'new-token'; };
+    context.ConfigStore.saveLoginProfile = async (username, password) => {
+        savedProfile = { username, password };
+    };
+    context.loadFavoriteProjects = async () => {};
+    context.showInfo = () => {};
+    elements.loginUsername.value = 'alice';
+    elements.loginPassword.value = 'alice-password';
+    await vm.runInContext('doLogin()', context);
+    assert.deepEqual(savedProfile, { username: 'alice', password: 'alice-password' });
+    assert.equal(elements.mainPage.style.display, 'flex');
+    context.loadFavoriteProjects = realLoadFavoriteProjects;
+    console.log('PASS: successful login saves the current profile');
 
     const requestedPages = [];
     const favoriteAccounts = [];
