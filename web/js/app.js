@@ -8,6 +8,7 @@
 
 const state = {
     page: 'login',            // 'login' | 'main'
+    currentUsername: '',
     projects: [],
     favoriteProjects: [],
     favoritePage: { page: 1, pageSize: 20 },
@@ -20,23 +21,100 @@ const state = {
     favorites: new Set(),
     uploadTasks: {},          // taskId -> PackageRecord 映射
     uploadTimer: null,        // 上传进度轮询定时器
+    currentRecordType: { family: 'install', offline: true },
 };
 
 const SESSION_TOKEN_KEY = 'ifaas-packing.token';
+const SESSION_USERNAME_KEY = 'ifaas-packing.username';
+
+const PACKAGE_TYPE_DEFINITIONS = {
+    upgrade: {
+        label: '升级包',
+        recordsPath: '/api/v1/recordsprojectupdate/',
+    },
+    install: {
+        label: '安装包',
+        recordsPath: '/api/v1/recordsprojectinstall/',
+    },
+};
+
+function getPackageType(family = 'upgrade', offline = true) {
+    const definition = PACKAGE_TYPE_DEFINITIONS[family] || PACKAGE_TYPE_DEFINITIONS.upgrade;
+    return {
+        family: family === 'install' ? 'install' : 'upgrade',
+        offline: Boolean(offline),
+        label: `${offline ? '离线' : '在线'}${definition.label}`,
+        recordsPath: definition.recordsPath,
+    };
+}
+
+function isSeafileUploadAllowed(packageType) {
+    return Boolean(packageType?.offline);
+}
+
+function getPackageTypeOptions() {
+    return [
+        getPackageType('upgrade', true),
+        getPackageType('install', true),
+        getPackageType('upgrade', false),
+        getPackageType('install', false),
+    ];
+}
+
+function getPackageFamilies() {
+    return [
+        { value: 'upgrade', label: '升级包' },
+        { value: 'install', label: '安装包' },
+    ];
+}
+
+function getNetworkTypes() {
+    return [
+        { value: 'offline', label: '离线' },
+        { value: 'online', label: '在线' },
+    ];
+}
+
+function getDefaultPackParameters() {
+    return {
+        family: 'install',
+        offline: true,
+        support_cpu: 'x86_64',
+        namespace: 'basic-app',
+        seafile: false,
+    };
+}
+
+function selectPackageRecordType(packageType) {
+    state.currentRecordType = packageType;
+    return state.currentRecordType;
+}
+
+function getLoginProfileName(search) {
+    const profile = new URLSearchParams(search || '').get('profile') || '';
+    return /^[a-zA-Z0-9_-]+$/.test(profile) ? profile : '';
+}
+
+async function prefillLoginProfile() {
+    const profileName = getLoginProfileName(window.location.search);
+    if (!profileName) return false;
+    const profile = await ConfigStore.loadLoginProfile(profileName);
+    if (!profile) return false;
+    document.getElementById('loginUsername').value = profile.username;
+    document.getElementById('loginPassword').value = profile.password;
+    return true;
+}
 
 /* ================================================================
  * 登录页
  * ================================================================ */
 
-async function showLoginPage() {
+function showLoginPage() {
     state.page = 'login';
     document.getElementById('loginPage').style.display = 'flex';
     document.getElementById('mainPage').style.display = 'none';
-
-    const creds = await ConfigStore.loadCredentials();
-    document.getElementById('loginUsername').value = creds.username || '';
-    document.getElementById('loginPassword').value = creds.password || '';
-    document.getElementById('loginRemember').checked = creds.remember;
+    document.getElementById('loginUsername').value = '';
+    document.getElementById('loginPassword').value = '';
 }
 
 function hideLoginPage() {
@@ -46,22 +124,82 @@ function hideLoginPage() {
     requestAnimationFrame(measureSplitterColumns);
 }
 
-function saveSessionToken(token) {
+function saveSessionToken(token, username) {
     sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+    sessionStorage.setItem(SESSION_USERNAME_KEY, username);
+    state.currentUsername = username;
+    updateUserMenu();
 }
 
 function clearSessionToken() {
     sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    sessionStorage.removeItem(SESSION_USERNAME_KEY);
     ApiClient.token = null;
+    state.currentUsername = '';
+    updateUserMenu();
+}
+
+function updateUserMenu() {
+    const nameElement = document.getElementById('userMenuName');
+    if (nameElement) nameElement.textContent = state.currentUsername || '当前用户';
+}
+
+function setUserMenuOpen(open) {
+    const menu = document.getElementById('userMenu');
+    const trigger = document.getElementById('userMenuTrigger');
+    menu.classList.toggle('open', open);
+    trigger.setAttribute('aria-expanded', String(open));
+}
+
+function showUserProfile() {
+    const overlay = document.getElementById('modalOverlay');
+    const body = document.getElementById('modalBody');
+    body.className = 'modal-body user-profile-modal';
+    body.innerHTML = `
+        <h3>个人信息</h3>
+        <div class="user-profile-row"><span>账号</span><strong>${escapeHtml(state.currentUsername || '-')}</strong></div>
+        <div class="modal-actions"><button type="button" class="btn btn-secondary" id="userProfileClose">关闭</button></div>
+    `;
+    overlay.style.display = 'flex';
+    document.getElementById('userProfileClose').onclick = closeModal;
+}
+
+async function logout() {
+    const button = document.getElementById('logoutButton');
+    button.disabled = true;
+    button.textContent = '退出中...';
+    try {
+        await ApiClient.logout();
+        clearSessionToken();
+        setUserMenuOpen(false);
+        showLoginPage();
+        showInfo('已退出登录', '当前会话已安全退出。');
+    } catch (error) {
+        showRequestError('退出登录失败', error);
+    } finally {
+        button.disabled = false;
+        button.textContent = '退出登录';
+    }
 }
 
 async function restoreSession() {
     const token = sessionStorage.getItem(SESSION_TOKEN_KEY);
     if (!token) {
         await showLoginPage();
+        await prefillLoginProfile();
+        return false;
+    }
+    const username = sessionStorage.getItem(SESSION_USERNAME_KEY);
+    if (!username) {
+        clearSessionToken();
+        await showLoginPage();
+        await prefillLoginProfile();
         return false;
     }
     ApiClient.token = token;
+    ApiClient.username = username;
+    state.currentUsername = username;
+    updateUserMenu();
     hideLoginPage();
     await loadFavoriteProjects();
     return true;
@@ -83,8 +221,6 @@ function showRequestError(title, error) {
 async function doLogin() {
     const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value;
-    const remember = document.getElementById('loginRemember').checked;
-
     if (!username || !password) {
         showError('登录失败', '请输入账号和密码。');
         return;
@@ -97,8 +233,7 @@ async function doLogin() {
     try {
         ApiClient.init(username, password);
         await ApiClient.login();
-        saveSessionToken(ApiClient.token);
-        await ConfigStore.saveCredentials(username, password, remember);
+        saveSessionToken(ApiClient.token, username);
         hideLoginPage();
         await loadFavoriteProjects();
         showInfo('登录成功', '正在加载项目...');
@@ -116,7 +251,7 @@ async function doLogin() {
 
 async function loadFavoriteProjects() {
     try {
-        state.favorites = await ConfigStore.loadFavorites();
+        state.favorites = await ConfigStore.loadFavorites(state.currentUsername);
         const projects = await Promise.all(
             [...state.favorites].map(projectId => ApiClient.getProject(projectId)),
         );
@@ -248,8 +383,8 @@ async function toggleFavorite(project) {
         showError('收藏失败', '当前项目缺少 id/pk 字段。');
         return;
     }
-    const favorited = await ConfigStore.toggleFavorite(pid);
-    state.favorites = await ConfigStore.loadFavorites();
+    const favorited = await ConfigStore.toggleFavorite(state.currentUsername, pid);
+    state.favorites = await ConfigStore.loadFavorites(state.currentUsername);
     if (favorited && !state.favoriteProjects.some(item => objectId(item) === pid)) {
         state.favoriteProjects.push(project);
     }
@@ -354,7 +489,7 @@ async function viewVersionRecords(version, triggerButton) {
     updateVersionSelection();
     const versionName = pick(version, 'update_version', '当前版本');
     document.getElementById('packageHint').textContent = `当前版本：${versionName}`;
-    await loadUpdateRecords(triggerButton);
+    await loadPackageRecords(triggerButton);
 }
 
 /* ================================================================
@@ -567,44 +702,50 @@ function showBranchDialog(mod, rowElement, gitUrl, refs) {
             branchOptions.classList.remove('open');
         };
     });
-    document.getElementById('branchCancel').onclick = closeModal;
-    document.getElementById('branchConfirm').onclick = async () => {
+    const cancelButton = document.getElementById('branchCancel');
+    const confirmButton = document.getElementById('branchConfirm');
+    cancelButton.onclick = closeModal;
+    confirmButton.onclick = async () => {
         const branch = branchInput.value.trim();
         if (!branch) {
             showError('无法修改分支', '目标分支不能为空。');
             return;
         }
-        closeModal();
+        setBranchSaveLoading(confirmButton, cancelButton, true);
         try {
             await updateModuleBranch(mod, rowElement, gitUrl, branch);
+            closeModal();
         } catch (err) {
             showRequestError('修改分支失败', err);
+            setBranchSaveLoading(confirmButton, cancelButton, false);
         }
     };
 }
 
+function setBranchSaveLoading(confirmButton, cancelButton, loading) {
+    confirmButton.disabled = loading;
+    cancelButton.disabled = loading;
+    confirmButton.textContent = loading ? '正在保存...' : '确认修改';
+}
+
 async function updateModuleBranch(mod, rowElement, gitUrl, branch) {
-    const configData = await ApiClient.getGitConfig(gitUrl, branch);
-    const config = configData.data || configData || {};
-    const gitId = config.git_id;
-    if (!gitId) throw new Error('git_config 接口未返回 git_id。');
+    const serviceName = pick(mod, 'name', 'module_name');
+    const gitId = mod.git_url && typeof mod.git_url === 'object'
+        ? (mod.git_url.id ?? mod.git_url.pk ?? mod.git_url.git_url)
+        : mod.git_url;
+    if (!gitId) throw new Error('当前服务缺少 git_url 字段。');
 
-    const gitMessages = config.git_message || [];
-    const firstMsg = (gitMessages.length && gitMessages[0]) ? gitMessages[0] : {};
-
-    const serviceName = pick(firstMsg, 'service_name') || pick(mod, 'name', 'module_name');
     const payload = {
         name: serviceName,
-        custom_name: serviceName,
+        custom_name: pick(mod, 'custom_name') || serviceName,
         service_type: mod.service_type ?? 1,
         branch: branch,
         APP_ID: mod.APP_ID || serviceName,
-        git_config_path: pick(firstMsg, 'git_config_path') || pick(mod, 'git_config_path', 'build_ci/config.yml'),
+        git_config_path: pick(mod, 'git_config_path') || 'build_ci/config.yml',
         is_image: mod.is_image ?? true,
         version: objectId(state.currentVersion || {}),
         git_url: gitId,
     };
-
     const mid = moduleId(mod);
     if (!mid) throw new Error('当前服务缺少 pk/id 字段。');
 
@@ -615,16 +756,21 @@ async function updateModuleBranch(mod, rowElement, gitUrl, branch) {
     }
 
     // 更新本地状态和 UI
-    mod.branch = branch;
-    rowElement.querySelector('.branch-text').textContent = branch;
-    showSuccess('修改成功', `${serviceName} 分支已更新为：${branch}`);
-}
+    // 以后端保存后返回的组件数据为准，供后续打包和列表展示使用。
+    const updatedModule = result && typeof result.data === 'object' ? result.data : result;
+    if (updatedModule && typeof updatedModule === 'object') {
+        Object.assign(mod, updatedModule);
+    }
+    const displayedBranch = pick(updatedModule, 'branch') || branch;
+    mod.branch = displayedBranch;
+    rowElement.querySelector('.branch-text').textContent = displayedBranch;
+    showSuccess('修改成功', `${serviceName} 分支已更新为：${displayedBranch}`);}
 
 /* ================================================================
  * 升级包记录弹窗
  * ================================================================ */
 
-async function loadUpdateRecords(triggerButton) {
+async function loadPackageRecords(triggerButton, packageType = state.currentRecordType) {
     if (!state.currentVersion) {
         showError('升级包查询失败', '请先选择一个版本。');
         return;
@@ -643,12 +789,12 @@ async function loadUpdateRecords(triggerButton) {
     }
 
     try {
-        const records = await ApiClient.getUpdateRecords(versionId, true);
+        const records = await ApiClient.getPackageRecords(packageType.family, versionId, packageType.offline);
         if (btn) {
             btn.disabled = false;
             btn.textContent = originalText;
         }
-        showRecordsDialog(records);
+        showRecordsDialog(records, packageType);
     } catch (err) {
         if (btn) {
             btn.disabled = false;
@@ -658,7 +804,7 @@ async function loadUpdateRecords(triggerButton) {
     }
 }
 
-function showRecordsDialog(records) {
+function showRecordsDialog(records, packageType = state.currentRecordType) {
     const versionName = pick(state.currentVersion || {}, 'update_version', '当前版本');
     const overlay = document.getElementById('modalOverlay');
     const body = document.getElementById('modalBody');
@@ -668,27 +814,19 @@ function showRecordsDialog(records) {
     body.innerHTML = `
         <div class="records-header">
             <div>
-                <h3>升级包模块浏览中心</h3>
+                <h3>打包记录</h3>
                 <p class="muted">${escapeHtml(versionName)} · 共 ${records.length} 条记录</p>
             </div>
             <button class="btn btn-secondary" id="recordsCloseTop">关闭</button>
         </div>
-        <div class="records-toolbar">
-            <input id="recordSearchInput" class="form-input" type="search" placeholder="搜索包名称 / 打包人">
-            <select id="recordStatusFilter" class="form-select">
-                <option value="">全部状态</option>
-                <option value="success">成功</option>
-                <option value="building">打包中</option>
-                <option value="failed">失败</option>
+        <div class="records-toolbar records-type-toolbar">
+            <label for="recordPackageFamily">包类型</label>
+            <select id="recordPackageFamily" class="form-select">
+                ${getPackageFamilies().map(option => `<option value="${option.value}" ${option.value === packageType.family ? 'selected' : ''}>${option.label}</option>`).join('')}
             </select>
-            <select id="recordCpuFilter" class="form-select">
-                <option value="">全部架构</option>
-                ${[...new Set(recordModels.map(item => item.supportCpu).filter(item => item && item !== '-'))]
-                    .map(cpu => `<option value="${escapeHtml(cpu)}">${escapeHtml(cpu)}</option>`).join('')}
-            </select>
-            <select id="recordSortSelect" class="form-select">
-                <option value="newest">最新优先</option>
-                <option value="oldest">最旧优先</option>
+            <label for="recordNetworkType">网络类型</label>
+            <select id="recordNetworkType" class="form-select">
+                ${getNetworkTypes().map(option => `<option value="${option.value}" ${(option.value === 'offline') === packageType.offline ? 'selected' : ''}>${option.label}</option>`).join('')}
             </select>
         </div>
         <div class="records-list artifact-list" id="recordsList"></div>
@@ -705,33 +843,17 @@ function showRecordsDialog(records) {
                 <div id="moduleDrawerContent"></div>
             </aside>
         </div>
-        <div class="modal-actions">
-            <button class="btn btn-secondary" id="recordsClose">关闭</button>
-        </div>
     `;
 
     overlay.style.display = 'flex';
     document.getElementById('recordsCloseTop').onclick = closeModal;
-    document.getElementById('recordsClose').onclick = closeModal;
     document.getElementById('moduleDrawerClose').onclick = closeModuleDrawer;
     body.querySelector('.module-drawer-mask').onclick = closeModuleDrawer;
 
     const renderList = () => {
-        const keyword = document.getElementById('recordSearchInput').value.trim().toLowerCase();
-        const status = document.getElementById('recordStatusFilter').value;
-        const cpu = document.getElementById('recordCpuFilter').value;
-        const sort = document.getElementById('recordSortSelect').value;
         const list = document.getElementById('recordsList');
 
-        const filtered = recordModels
-            .filter(item => !keyword || `${item.packageName} ${item.builder}`.toLowerCase().includes(keyword))
-            .filter(item => !status || item.status.key === status)
-            .filter(item => !cpu || item.supportCpu === cpu)
-            .sort((a, b) => sort === 'oldest'
-                ? String(a.createdTime).localeCompare(String(b.createdTime))
-                : String(b.createdTime).localeCompare(String(a.createdTime)));
-
-        if (!filtered.length) {
+        if (!recordModels.length) {
             list.innerHTML = `
                 <div class="records-empty">
                     <div class="records-empty-icon">📦</div>
@@ -742,13 +864,19 @@ function showRecordsDialog(records) {
             return;
         }
 
-        list.innerHTML = filtered.map(renderArtifactCard).join('');
+        list.innerHTML = recordModels.map(record => renderArtifactCard(record, packageType)).join('');
     };
 
     renderList();
-    ['recordSearchInput', 'recordStatusFilter', 'recordCpuFilter', 'recordSortSelect'].forEach(id => {
-        document.getElementById(id).oninput = renderList;
-    });
+    const changeRecordType = () => {
+        state.currentRecordType = getPackageType(
+            document.getElementById('recordPackageFamily').value,
+            document.getElementById('recordNetworkType').value === 'offline',
+        );
+        loadPackageRecords(null, state.currentRecordType);
+    };
+    document.getElementById('recordPackageFamily').onchange = changeRecordType;
+    document.getElementById('recordNetworkType').onchange = changeRecordType;
 
     body.onclick = async (event) => {
         const target = event.target;
@@ -764,11 +892,9 @@ function showRecordsDialog(records) {
             return;
         }
         if (target.closest?.('.delete-record-btn')) {
-            const deleted = await deleteUpdateRecord(card, target.closest('.delete-record-btn'), record?.raw);
-            if (deleted && record) {
-                const pos = recordModels.findIndex(item => item.index === record.index);
-                if (pos >= 0) recordModels.splice(pos, 1);
-                renderList();
+            const deleted = await deletePackageRecord(card, target.closest('.delete-record-btn'), record?.raw, packageType);
+            if (deleted) {
+                await loadPackageRecords(null, packageType);
             }
             return;
         }
@@ -877,7 +1003,8 @@ function normalizeUpdateRecord(record, index) {
     };
 }
 
-function renderArtifactCard(record) {
+function renderArtifactCard(record, packageType = state.currentRecordType) {
+    const canUpload = isSeafileUploadAllowed(packageType);
     return `
         <article class="record-card artifact-card" data-index="${record.index}" data-storage="${escapeHtml(record.storagePath)}" data-record-id="${escapeHtml(record.recordId)}">
             <div class="artifact-summary">
@@ -906,7 +1033,7 @@ function renderArtifactCard(record) {
                     <span class="address-value" title="${escapeHtml(record.hasSeafile ? record.seafilePath : '暂无云盘地址')}">${escapeHtml(record.hasSeafile ? record.seafilePath : '暂无云盘地址')}</span>
                     ${record.hasSeafile
                         ? '<button class="btn btn-sm copy-extranet-btn">复制</button>'
-                        : '<button class="btn btn-sm upload-seafile-btn">上传云盘</button>'}
+                        : (canUpload ? '<button class="btn btn-sm upload-seafile-btn">上传云盘</button>' : '')}
                 </div>
             </div>
             <div class="upload-progress" style="display:none">
@@ -949,17 +1076,14 @@ function renderArtifactModules(record) {
                 const branch = pick(mod, 'ref_name', 'branch', 'tag', 'git_branch', '-');
                 return `
                     <button class="artifact-module-card" type="button" data-record-index="${record.index}" data-module-index="${moduleIndex}">
-                        <div class="module-card-top">
-                            <strong title="${escapeHtml(serviceName)}">${escapeHtml(serviceName)}</strong>
-                            <span class="module-id">#${escapeHtml(pick(mod, 'pk', 'id', '-'))}</span>
+                        <div class="module-form-row">
+                            <span>服务名称：</span><strong title="${escapeHtml(serviceName)}">${escapeHtml(serviceName)}</strong>
                         </div>
-                        <div class="module-card-line">
-                            <span>分支</span>
-                            <b title="${escapeHtml(branch)}">${escapeHtml(branch)}</b>
+                        <div class="module-form-row">
+                            <span>版本分支：</span><b title="${escapeHtml(branch)}">${escapeHtml(branch)}</b>
                         </div>
-                        <div class="module-card-bottom">
-                            <span class="apollo-tag ${apollo.className}">${escapeHtml(apollo.label)}</span>
-                            <span class="module-card-arrow">›</span>
+                        <div class="module-form-row">
+                            <span>配置中心：</span><b class="apollo-value ${apollo.className}">${escapeHtml(apollo.label.replace('配置中心：', ''))}</b>
                         </div>
                     </button>
                 `;
@@ -1001,21 +1125,21 @@ function toggleArtifactDetail(card) {
     card.classList.toggle('expanded', open);
 }
 
-async function deleteUpdateRecord(card, btn, record) {
+async function deletePackageRecord(card, btn, record, packageType = state.currentRecordType) {
     const recordId = pick(record || {}, 'id', 'pk') || card.dataset.recordId;
     if (!recordId) {
-        showError('删除失败', '当前升级包记录缺少 id/pk 字段。');
+        showError('删除失败', '当前打包记录缺少 id/pk 字段。');
         return false;
     }
-    if (!window.confirm('确认删除这条升级包记录？')) return false;
+    if (!window.confirm('确认删除这条打包记录？')) return false;
 
     const originalText = btn.textContent;
     btn.disabled = true;
     btn.textContent = '删除中...';
     try {
-        await ApiClient.deleteUpdateRecord(recordId);
+        await ApiClient.deletePackageRecord(packageType.family, recordId);
         card.remove();
-        showSuccess('删除成功', '升级包记录已删除。');
+        showSuccess('删除成功', '打包记录已删除。');
         return true;
     } catch (err) {
         btn.disabled = false;
@@ -1117,6 +1241,11 @@ async function uploadToSeafile(card, btn, record, storagePath) {
     }
 }
 
+function formatUploadProgress(progress) {
+    const speed = progress.speed ? ` · ${progress.speed}` : '';
+    return `${progress.description || '上传中'}：${progress.percent || 0}%${speed}`;
+}
+
 function startUploadPolling() {
     if (state.uploadTimer) return;
     state.uploadTimer = setInterval(pollUploadProgress, 2000);
@@ -1149,7 +1278,7 @@ async function pollUploadProgress() {
                 fill.style.width = Math.min(100, Math.max(0, Number(progress.percent) || 0)) + '%';
             }
             if (text && progress.description) {
-                text.textContent = `${progress.description}：${progress.percent || 0}%`;
+                text.textContent = formatUploadProgress(progress);
             }
 
             if (result.complete) {
@@ -1159,7 +1288,7 @@ async function pollUploadProgress() {
                 delete state.uploadTasks[taskId];
                 if (success) {
                     showSuccess('上传完成', '网盘上传任务已完成。');
-                    await loadUpdateRecords();
+                    await loadPackageRecords();
                 } else {
                     showError('上传失败', '网盘上传任务执行失败。');
                 }
@@ -1178,7 +1307,110 @@ async function pollUploadProgress() {
  * 提交打包
  * ================================================================ */
 
-async function submitPack() {
+function renderPackConfirmationItems(modules) {
+    return modules.map(module => {
+        const name = escapeHtml(pick(module, 'custom_name', 'name', 'module_name', '未命名组件'));
+        const branch = escapeHtml(pick(module, 'ref_name', 'branch', 'git_branch', 'tag', '-'));
+        return `<li class="pack-confirm-item"><span>${name}</span><code>${branch}</code></li>`;
+    }).join('');
+}
+
+function alignPackConfirmationNames(body) {
+    const names = [...body.querySelectorAll('.pack-confirm-item > span')];
+    const maxWidth = Math.max(...names.map(name => name.scrollWidth), 0);
+    body.style.setProperty('--pack-confirm-name-width', `${maxWidth}px`);
+}
+
+function showPackageFamilySelection(payload) {
+    const overlay = document.getElementById('modalOverlay');
+    const body = document.getElementById('modalBody');
+    const defaults = getDefaultPackParameters();
+    body.className = 'modal-body pack-confirm-modal';
+    body.innerHTML = `
+        <h3>打包参数</h3>
+        <div class="form-card pack-parameter-form">
+            <div class="form-row"><span class="label">包类型</span>
+                <select id="packageFamilySelect" class="form-select">
+                    <option value="install">安装包</option><option value="upgrade">升级包</option>
+                </select>
+            </div>
+            <div class="form-row"><span class="label">网络类型</span>
+                <select id="packageNetworkSelect" class="form-select">
+                    <option value="offline">离线</option><option value="online">在线</option>
+                </select>
+            </div>
+            <div class="form-row"><span class="label">CPU 架构</span>
+                <select id="packageCpuSelect" class="form-select">
+                    <option value="x86_64">x86_64</option><option value="aarch64">aarch64</option>
+                </select>
+            </div>
+            <div class="form-row"><span class="label">命名空间</span>
+                <input id="packageNamespaceInput" class="form-input" value="${defaults.namespace}">
+            </div>
+            <div class="form-row"><span class="label">上传云盘</span>
+                <span id="packageSeafileToggleWrap" class="toggle-wrap"><label class="toggle-track">
+                    <input type="checkbox" id="packageSeafileToggle">
+                </label></span>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" id="packageFamilyCancel">取消</button>
+            <button type="button" class="btn btn-primary" id="packageParameterNext">下一步</button>
+        </div>
+    `;
+    overlay.style.display = 'flex';
+    document.getElementById('packageFamilyCancel').onclick = closeModal;
+    const networkSelect = document.getElementById('packageNetworkSelect');
+    const seafileToggle = document.getElementById('packageSeafileToggle');
+    const seafileWrap = document.getElementById('packageSeafileToggleWrap');
+    const syncSeafile = () => {
+        const enabled = networkSelect.value === 'offline';
+        seafileToggle.disabled = !enabled;
+        if (!enabled) seafileToggle.checked = false;
+        seafileWrap.classList.toggle('toggle-disabled', !enabled);
+    };
+    networkSelect.onchange = syncSeafile;
+    syncSeafile();
+    document.getElementById('packageParameterNext').onclick = () => {
+        const family = document.getElementById('packageFamilySelect').value;
+        const offline = networkSelect.value === 'offline';
+        const packageType = getPackageType(family, offline);
+        showPackConfirmation({
+            ...payload,
+            packageType,
+            offline: offline ? 1 : 0,
+            support_cpu: document.getElementById('packageCpuSelect').value,
+            namespace: document.getElementById('packageNamespaceInput').value.trim() || defaults.namespace,
+            seafile: isSeafileUploadAllowed(packageType) && seafileToggle.checked,
+        });
+    };
+}
+
+function showPackConfirmation(payload) {
+    const overlay = document.getElementById('modalOverlay');
+    const body = document.getElementById('modalBody');
+    body.className = 'modal-body pack-confirm-modal';
+    body.innerHTML = `
+        <h3>确认开始打包</h3>
+        <p class="muted">包类型：${escapeHtml(payload.packageType.label)}</p>
+        <p class="muted">网络类型：${payload.packageType.offline ? '离线' : '在线'}　CPU 架构：${escapeHtml(payload.support_cpu)}　命名空间：${escapeHtml(payload.namespace)}　上传云盘：${payload.seafile ? '是' : '否'}</p>
+        <p class="muted">请确认以下组件及分支，确认后将提交打包任务。</p>
+        <ul class="pack-confirm-list">${renderPackConfirmationItems(payload.modules)}</ul>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" id="packConfirmCancel">取消</button>
+            <button type="button" class="btn btn-primary" id="packConfirmSubmit">确认打包</button>
+        </div>
+    `;
+    overlay.style.display = 'flex';
+    alignPackConfirmationNames(body);
+    document.getElementById('packConfirmCancel').onclick = closeModal;
+    document.getElementById('packConfirmSubmit').onclick = () => {
+        closeModal();
+        executePack(payload);
+    };
+}
+
+function submitPack() {
     if (!state.currentVersion) {
         showError('无法打包', '请先选择一个版本。');
         return;
@@ -1190,6 +1422,10 @@ async function submitPack() {
         return;
     }
 
+    showPackageFamilySelection(payload);
+}
+
+async function executePack(payload) {
     const versionId = objectId(state.currentVersion);
     const btn = document.getElementById('packButton');
     btn.disabled = true;
@@ -1197,9 +1433,12 @@ async function submitPack() {
     setRightPanelLoading(true, '正在提交打包...');
 
     try {
-        const result = await ApiClient.submitPack(versionId, payload);
+        const { packageType, ...requestPayload } = payload;
+        const result = await ApiClient.submitPackage(packageType.family, versionId, requestPayload);
         const message = pick(result, 'msg', 'message', 'detail', '打包任务已提交。');
         showSuccess('提交成功', message);
+        selectPackageRecordType(packageType);
+        await loadPackageRecords();
     } catch (err) {
         showRequestError('提交打包失败', err);
     } finally {
@@ -1208,9 +1447,7 @@ async function submitPack() {
         setRightPanelLoading(false);
     }
 }
-
 function buildPackPayload() {
-    const needApollo = Boolean(document.getElementById('apolloInput').value.trim());
     const rows = document.querySelectorAll('#moduleList .module-row');
 
     const modules = [];
@@ -1220,7 +1457,7 @@ function buildPackPayload() {
         const mod = state.moduleRows[Number(row.dataset.index)];
         if (!mod) return;
         modules.push({
-            need_apollo: needApollo,
+            need_apollo: true,
             ref_name: pick(mod, 'branch', 'ref_name', 'git_branch', 'tag'),
             pk: mod.pk ?? mod.id,
             name: pick(mod, 'name', 'module_name'),
@@ -1229,12 +1466,6 @@ function buildPackPayload() {
     });
 
     return {
-        offline: document.getElementById('offlineRadio').checked ? 1 : 0,
-        support_cpu: document.getElementById('cpuSelect').value,
-        seafile: document.getElementById('seafileToggle').checked,
-        namespace: document.getElementById('namespaceInput').value.trim() || 'basic-app',
-        platform: [],
-        support_os: [],
         modules: modules,
     };
 }
@@ -1357,16 +1588,25 @@ function initResizableSplitter() {
  * 初始化
  * ================================================================ */
 
-function syncSeafileToggle(checked) {
-    document.getElementById('seafileToggleWrap').classList.toggle('toggle-on', checked);
-}
-
 function initApp() {
     // 登录页事件
     document.getElementById('loginButton').onclick = doLogin;
     document.getElementById('loginPassword').onkeydown = (e) => {
         if (e.key === 'Enter') doLogin();
     };
+
+    document.getElementById('userMenuTrigger').onclick = () => {
+        const menu = document.getElementById('userMenu');
+        setUserMenuOpen(!menu.classList.contains('open'));
+    };
+    document.getElementById('userProfileButton').onclick = () => {
+        setUserMenuOpen(false);
+        showUserProfile();
+    };
+    document.getElementById('logoutButton').onclick = logout;
+    document.addEventListener('click', event => {
+        if (!document.getElementById('userMenu').contains(event.target)) setUserMenuOpen(false);
+    });
 
     // 搜索项目
     document.getElementById('projectSearch').oninput = debouncedSearch;
@@ -1393,11 +1633,6 @@ function initApp() {
         if (e.target === document.getElementById('modalOverlay')) closeModal();
     };
     document.getElementById('modalCloseBtn').onclick = closeModal;
-
-    // Seafile toggle
-    document.getElementById('seafileToggle').onchange = function () {
-        syncSeafileToggle(this.checked);
-    };
 
     initResizableSplitter();
 

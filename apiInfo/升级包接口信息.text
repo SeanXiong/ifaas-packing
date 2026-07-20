@@ -1,0 +1,4 @@
+打离线升级包
+POST http://192.168.12.35:3000/api/v1/packplus/upgrade/2038 HTTP/1.1
+请求参数：{"offline":1,"support_cpu":"aarch64","seafile":false,"namespace":"basic-app","modules":[{"need_apollo":true,"ref_name":"rel_1.6.4_DeepSea_chengfei","pk":26558,"name":"ifaas-monitor-analysis","custom_name":"ifaas-monitor-analysis"},{"need_apollo":true,"ref_name":"rel_1.6.4_DeepSea_hotfix_chengfei","pk":26567,"name":"ifaas-webclient","custom_name":"ifaas-webclient"}],"platform":[],"support_os":[]}
+返回参数：{"is_successed":true,"record_module_install_id":"2038","version_pack_info":"rel_1.6.4_DeepSea_chengfei"}

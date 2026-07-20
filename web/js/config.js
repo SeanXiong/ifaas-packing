@@ -27,65 +27,70 @@ const ConfigStore = {
 
     /* ---- 收藏 ---- */
 
-    async loadFavorites() {
+    async loadLoginProfile(username) {
+        const account = String(username || '').trim();
+        if (!/^[a-zA-Z0-9_-]+$/.test(account)) return null;
         try {
-            const data = await this._read('favorites');
-            if (!data || !Array.isArray(data.project_ids)) return new Set();
-            return new Set(data.project_ids.map(String));
+            const data = await this._read('login-profiles');
+            const profile = data && data.accounts && data.accounts[account];
+            if (!profile || typeof profile !== 'object') return null;
+            const profileUsername = String(profile.username || account).trim();
+            const password = String(profile.password || '');
+            return profileUsername && password ? { username: profileUsername, password } : null;
+        } catch {
+            return null;
+        }
+    },
+
+    _favoriteAccount(username) {
+        const account = String(username || '').trim();
+        if (!account) throw new Error('未找到当前登录账号。');
+        return account;
+    },
+
+    async _favoriteData(username) {
+        const account = this._favoriteAccount(username);
+        const data = await this._read('favorites');
+        const accounts = data && data.accounts && typeof data.accounts === 'object'
+            ? data.accounts
+            : {};
+
+        // 兼容历史的单账号收藏文件：首次登录时归属到当前账号。
+        if (data && Array.isArray(data.project_ids)) {
+            accounts[account] = { project_ids: data.project_ids.map(String) };
+            await this._write('favorites', { accounts });
+        }
+        return { account, accounts };
+    },
+
+    async loadFavorites(username) {
+        try {
+            const { account, accounts } = await this._favoriteData(username);
+            const projectIds = accounts[account] && accounts[account].project_ids;
+            return new Set(Array.isArray(projectIds) ? projectIds.map(String) : []);
         } catch {
             return new Set();
         }
     },
 
-    async saveFavorites(favorites) {
-        const data = { project_ids: [...favorites].sort() };
-        await this._write('favorites', data);
+    async saveFavorites(username, favorites) {
+        const { account, accounts } = await this._favoriteData(username);
+        accounts[account] = { project_ids: [...favorites].map(String).sort() };
+        await this._write('favorites', { accounts });
     },
 
-    async toggleFavorite(projectId) {
-        const favs = await this.loadFavorites();
+    async toggleFavorite(username, projectId) {
+        const favs = await this.loadFavorites(username);
         const key = String(projectId);
         if (favs.has(key)) {
             favs.delete(key);
-            await this.saveFavorites(favs);
+            await this.saveFavorites(username, favs);
             return false; // 已取消收藏
         } else {
             favs.add(key);
-            await this.saveFavorites(favs);
+            await this.saveFavorites(username, favs);
             return true; // 已收藏
         }
     },
 
-    /* ---- 登录凭据 ---- */
-
-    async loadCredentials() {
-        try {
-            const data = await this._read('credentials');
-            if (!data) return this.defaults();
-            return {
-                username: String(data.username || 'sujiangang'),
-                password: String(data.password || 'Intellif@123'),
-                remember: Boolean(data.remember ?? true),
-            };
-        } catch {
-            return this.defaults();
-        }
-    },
-
-    defaults() {
-        return {
-            username: 'sujiangang',
-            password: 'Intellif@123',
-            remember: true,
-        };
-    },
-
-    async saveCredentials(username, password, remember) {
-        const data = {
-            username: remember ? username : '',
-            password: remember ? password : '',
-            remember: remember,
-        };
-        await this._write('credentials', data);
-    },
 };

@@ -1,0 +1,3 @@
+登录退出
+GET http://192.168.12.35:3000/rest-auth/logout/ HTTP/1.1
+返回参数：{"detail":"Successfully logged out."}

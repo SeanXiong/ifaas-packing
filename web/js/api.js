@@ -81,6 +81,11 @@ const ApiClient = {
         return this.token;
     },
 
+    /** 登出当前会话 */
+    async logout() {
+        return this._request('GET', '/rest-auth/logout/');
+    },
+
     /** 获取单个项目 */
     async getProject(projectId) {
         return this._request('GET', `/api/v1/project/${encodeURIComponent(String(projectId))}`);
@@ -117,25 +122,44 @@ const ApiClient = {
     },
 
     /** 获取升级包记录 */
-    async getUpdateRecords(versionId, offlineStatus = true) {
+    _packageResource(family = 'upgrade') {
+        return family === 'install' ? 'install' : 'update';
+    },
+
+    async getPackageRecords(family, versionId, offlineStatus = true) {
         const params = new URLSearchParams({
             version_id: String(versionId),
             offline_status: offlineStatus ? 'True' : 'False',
         });
-        const data = await this._request('GET', `/api/v1/recordsprojectupdate/?${params}`);
+        const resource = this._packageResource(family);
+        const data = await this._request('GET', `/api/v1/recordsproject${resource}/?${params}`);
         return this._asList(data);
     },
 
     /** 删除升级包记录 */
-    async deleteUpdateRecord(recordId) {
-        const data = await this._request('DELETE', `/api/v1/recordsprojectupdate/${recordId}`, {});
+    async deletePackageRecord(family, recordId) {
+        const resource = this._packageResource(family);
+        const data = await this._request('DELETE', `/api/v1/recordsproject${resource}/${recordId}`, {});
         return data || { ok: true };
     },
 
     /** 提交打包 */
-    async submitPack(versionId, payload) {
-        const data = await this._request('POST', `/api/v1/packplus/upgrade/${versionId}`, payload);
+    async submitPackage(family, versionId, payload) {
+        const endpoint = family === 'install' ? 'install' : 'upgrade';
+        const data = await this._request('POST', `/api/v1/packplus/${endpoint}/${versionId}`, payload);
         return data;
+    },
+
+    async getUpdateRecords(versionId, offlineStatus = true) {
+        return this.getPackageRecords('upgrade', versionId, offlineStatus);
+    },
+
+    async deleteUpdateRecord(recordId) {
+        return this.deletePackageRecord('upgrade', recordId);
+    },
+
+    async submitPack(versionId, payload) {
+        return this.submitPackage('upgrade', versionId, payload);
     },
 
     /** 获取 Git refs（分支和标签） */

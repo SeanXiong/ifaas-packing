@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>项目打包客户端</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/app.css?v=202607201800">
 </head>
 <body>
 
@@ -30,12 +30,6 @@
             <label>密码</label>
             <input type="password" id="loginPassword" class="form-input" placeholder="密码" autocomplete="current-password">
         </div>
-        <div class="form-group">
-            <label class="select-all-label">
-                <input type="checkbox" id="loginRemember" checked>
-                记住账号密码
-            </label>
-        </div>
         <button id="loginButton" class="btn btn-primary" style="width:100%; margin-top: 8px;">登录</button>
     </div>
 </div>
@@ -48,6 +42,17 @@
     <div class="app-header">
         <h1>项目打包工作台</h1>
         <span class="subtitle">三栏联动选择项目、版本与服务组件</span>
+        <div class="user-menu" id="userMenu">
+            <button type="button" class="user-menu-trigger" id="userMenuTrigger" aria-haspopup="true" aria-expanded="false">
+                <span class="user-avatar" aria-hidden="true">👤</span>
+                <span class="user-name" id="userMenuName">当前用户</span>
+                <span class="user-menu-caret" aria-hidden="true">⌄</span>
+            </button>
+            <div class="user-menu-panel" id="userMenuPanel" role="menu">
+                <button type="button" class="user-menu-item" id="userProfileButton" role="menuitem">个人信息</button>
+                <button type="button" class="user-menu-item danger" id="logoutButton" role="menuitem">退出登录</button>
+            </div>
+        </div>
     </div>
 
     <!-- Three-column splitter -->
@@ -98,39 +103,6 @@
                 <div id="moduleLoading" class="loading-ring hidden"></div>
             </div>
 
-            <!-- 全局参数 -->
-            <div class="form-card">
-                <h4>全局参数</h4>
-                <div class="form-row">
-                    <span class="label">升级包类型</span>
-                    <div class="radio-group">
-                        <label><input type="radio" name="packageType" id="offlineRadio" checked> 离线升级包</label>
-                        <label><input type="radio" name="packageType" id="onlineRadio"> 在线升级包</label>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <span class="label">CPU 架构</span>
-                    <select id="cpuSelect" class="form-select" style="width:130px;">
-                        <option>x86_64</option>
-                        <option>aarch64</option>
-                    </select>
-
-                    <span class="label" style="margin-left:20px;">上传云盘</span>
-                    <span id="seafileToggleWrap" class="toggle-wrap">
-                        <label class="toggle-track">
-                            <input type="checkbox" id="seafileToggle">
-                        </label>
-                    </span>
-                </div>
-                <div class="form-row">
-                    <span class="label">命名空间</span>
-                    <input type="text" id="namespaceInput" class="form-input" value="basic-app" style="width:160px;">
-
-                    <span class="label" style="margin-left:20px;">Apollo 数据库</span>
-                    <input type="text" id="apolloInput" class="form-input" placeholder="IP，留空不启用" style="width:160px;">
-                </div>
-            </div>
-
             <!-- 业务组件 -->
             <h4 style="margin-bottom:6px; flex-shrink:0;">业务组件</h4>
             <div class="module-tools">
@@ -167,10 +139,10 @@
 <!-- ================================================================
      JavaScript
      ================================================================ -->
-<script src="js/utils.js"></script>
-<script src="js/config.js"></script>
-<script src="js/api.js"></script>
-<script src="js/app.js"></script>
+    <script src="js/utils.js?v=202607201800"></script>
+    <script src="js/config.js?v=202607201800"></script>
+    <script src="js/api.js?v=202607201800"></script>
+    <script src="js/app.js?v=202607201800"></script>
 
 </body>
 </html>

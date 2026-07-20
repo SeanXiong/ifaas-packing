@@ -27,6 +27,7 @@ SERVER_CONFIG_PATH = CONFIG_DIR / "server.json"
 _SAFE_CONFIG_NAME = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
 LONG_RUNNING_PROXY_PATHS = (
     "/api/v1/packplus/upgrade/",
+    "/api/v1/packplus/install/",
 )
 
 

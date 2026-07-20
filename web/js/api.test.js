@@ -50,9 +50,44 @@ async function testInvalidTokenResponseIsAuthenticationError() {
     );
 }
 
+async function testInstallationPackageUsesInstallationResources() {
+    const requests = [];
+    context.fetch = async (url, options) => {
+        requests.push({ url, options });
+        return {
+            ok: true,
+            text: async () => JSON.stringify({ results: [] }),
+        };
+    };
+
+    await vm.runInContext("ApiClient.getPackageRecords('install', 2451, false)", context);
+    await vm.runInContext("ApiClient.deletePackageRecord('install', 19390)", context);
+    await vm.runInContext("ApiClient.submitPackage('install', 2451, { offline: 0 })", context);
+
+    assert.match(requests[0].url, /\/api\/v1\/recordsprojectinstall\/\?version_id=2451&offline_status=False$/);
+    assert.equal(requests[1].url, '/api/proxy/api/v1/recordsprojectinstall/19390');
+    assert.equal(requests[1].options.method, 'DELETE');
+    assert.equal(requests[2].url, '/api/proxy/api/v1/packplus/install/2451');
+    assert.equal(JSON.parse(requests[2].options.body).offline, 0);
+}
+
+async function testLogoutUsesDocumentedEndpoint() {
+    const requests = [];
+    context.fetch = async (url, options) => {
+        requests.push({ url, options });
+        return { ok: true, text: async () => JSON.stringify({ detail: 'Successfully logged out.' }) };
+    };
+
+    await vm.runInContext('ApiClient.logout()', context);
+    assert.equal(requests[0].url, '/api/proxy/rest-auth/logout/');
+    assert.equal(requests[0].options.method, 'GET');
+}
+
 (async () => {
     await testGetProjectsPageRequestsOnlyOnePage();
     await testInvalidTokenResponseIsAuthenticationError();
+    await testInstallationPackageUsesInstallationResources();
+    await testLogoutUsesDocumentedEndpoint();
     console.log('PASS: project page requests and invalid Token handling');
 })().catch((error) => {
     console.error(error);
