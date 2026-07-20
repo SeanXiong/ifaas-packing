@@ -80,11 +80,29 @@ const ConfigStore = {
     async loadFavorites(username) {
         try {
             const { account, accounts } = await this._favoriteData(username);
-            const projectIds = accounts[account] && accounts[account].project_ids;
+            const entry = accounts[account] || {};
+            const projectIds = Array.isArray(entry.projects)
+                ? entry.projects.map(project => project && (project.id ?? project.pk)).filter(Boolean)
+                : entry.project_ids;
             return new Set(Array.isArray(projectIds) ? projectIds.map(String) : []);
         } catch {
             return new Set();
         }
+    },
+
+    async loadFavoriteProjects(username) {
+        const { account, accounts } = await this._favoriteData(username);
+        const projects = accounts[account] && accounts[account].projects;
+        return Array.isArray(projects) ? projects.filter(project => project && typeof project === 'object') : null;
+    },
+
+    async saveFavoriteProjects(username, projects) {
+        const { account, accounts } = await this._favoriteData(username);
+        accounts[account] = {
+            projects: (Array.isArray(projects) ? projects : [])
+                .filter(project => project && typeof project === 'object'),
+        };
+        await this._write('favorites', { accounts });
     },
 
     async saveFavorites(username, favorites) {

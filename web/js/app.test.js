@@ -158,8 +158,8 @@ const indexHtml = fs.readFileSync(__dirname + '/../index.html', 'utf8');
 assert.doesNotMatch(indexHtml, /id="seafileToggleWrap" class="[^"]*toggle-on/);
 assert.doesNotMatch(indexHtml, /id="loginRemember"/);
 assert.match(indexHtml, /<link rel="icon" type="image\/svg\+xml" href="favicon\.svg">/);
-assert.match(indexHtml, /<script src="js\/utils\.js\?v=202607201900"><\/script>/);
-assert.match(indexHtml, /<script src="js\/app\.js\?v=202607201900"><\/script>/);
+assert.match(indexHtml, /<script src="js\/utils\.js\?v=202607201910"><\/script>/);
+assert.match(indexHtml, /<script src="js\/app\.js\?v=202607201910"><\/script>/);
 assert.match(indexHtml, /id="userMenuTrigger"/);
 assert.match(indexHtml, /id="logoutButton"/);
 assert.doesNotMatch(indexHtml, /id="offlineRadio"/);
@@ -252,10 +252,9 @@ console.log('PASS: favorite projects use local pagination');
     const requestedPages = [];
     const favoriteAccounts = [];
     let favoriteProjectRequests = 0;
-    context.ConfigStore.loadFavorites = async () => new Set(['1', '2']);
-    context.ConfigStore.loadFavorites = async username => {
+    context.ConfigStore.loadFavoriteProjects = async username => {
         favoriteAccounts.push(username);
-        return new Set(['1', '2']);
+        return [];
     };
     context.ApiClient.getProject = async () => {
         favoriteProjectRequests++;
@@ -267,7 +266,7 @@ console.log('PASS: favorite projects use local pagination');
     };
     vm.runInContext("state.currentUsername = 'alice'", context);
     await vm.runInContext('loadFavoriteProjects()', context);
-    assert.equal(favoriteProjectRequests, 2);
+    assert.equal(favoriteProjectRequests, 0);
     assert.deepEqual(favoriteAccounts, ['alice']);
     assert.deepEqual(requestedPages, []);
     assert.equal(elements.projectPagination.classList.has('hidden'), false);

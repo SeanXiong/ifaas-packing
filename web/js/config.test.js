@@ -36,6 +36,11 @@ vm.runInContext(fs.readFileSync(__dirname + '/config.js', 'utf8'), context);
     assert.deepEqual(Array.from(alice), ['101']);
     assert.deepEqual(Array.from(bob), ['202']);
 
+    await vm.runInContext("ConfigStore.saveFavoriteProjects('alice', [{ id: 101, name: 'Alice Project' }])", context);
+    const cachedProjects = await vm.runInContext("ConfigStore.loadFavoriteProjects('alice')", context);
+    assert.deepEqual(JSON.parse(JSON.stringify(cachedProjects)), [{ id: 101, name: 'Alice Project' }]);
+    assert.equal(files.favorites.accounts.alice.project_ids, undefined);
+
     await vm.runInContext("ConfigStore.toggleFavorite('alice', '303')", context);
     const bobAfterAliceChange = await vm.runInContext("ConfigStore.loadFavorites('bob')", context);
     assert.deepEqual(Array.from(bobAfterAliceChange), ['202']);

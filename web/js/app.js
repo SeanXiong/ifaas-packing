@@ -254,11 +254,18 @@ async function doLogin() {
 
 async function loadFavoriteProjects() {
     try {
-        state.favorites = await ConfigStore.loadFavorites(state.currentUsername);
-        const projects = await Promise.all(
-            [...state.favorites].map(projectId => ApiClient.getProject(projectId)),
-        );
-        state.favoriteProjects = projects.filter(project => project && typeof project === 'object');
+        const cachedProjects = await ConfigStore.loadFavoriteProjects(state.currentUsername);
+        if (cachedProjects !== null) {
+            state.favoriteProjects = cachedProjects;
+            state.favorites = new Set(cachedProjects.map(project => objectId(project)).filter(Boolean));
+        } else {
+            state.favorites = await ConfigStore.loadFavorites(state.currentUsername);
+            const projects = await Promise.all(
+                [...state.favorites].map(projectId => ApiClient.getProject(projectId)),
+            );
+            state.favoriteProjects = projects.filter(project => project && typeof project === 'object');
+            await ConfigStore.saveFavoriteProjects(state.currentUsername, state.favoriteProjects);
+        }
         state.favoritePage.page = 1;
         renderProjects();
         document.getElementById('projectPagination').classList.toggle('hidden', state.projectTab !== 'favorite');
@@ -386,14 +393,15 @@ async function toggleFavorite(project) {
         showError('收藏失败', '当前项目缺少 id/pk 字段。');
         return;
     }
-    const favorited = await ConfigStore.toggleFavorite(state.currentUsername, pid);
-    state.favorites = await ConfigStore.loadFavorites(state.currentUsername);
+    const favorited = !state.favorites.has(pid);
     if (favorited && !state.favoriteProjects.some(item => objectId(item) === pid)) {
         state.favoriteProjects.push(project);
     }
     if (!favorited) {
         state.favoriteProjects = state.favoriteProjects.filter(item => objectId(item) !== pid);
     }
+    state.favorites = new Set(state.favoriteProjects.map(item => objectId(item)).filter(Boolean));
+    await ConfigStore.saveFavoriteProjects(state.currentUsername, state.favoriteProjects);
     const favoritePageCount = Math.max(1, Math.ceil(state.favoriteProjects.length / state.favoritePage.pageSize));
     state.favoritePage.page = Math.min(state.favoritePage.page, favoritePageCount);
     renderProjects();
