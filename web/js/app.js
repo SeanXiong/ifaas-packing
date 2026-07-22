@@ -1377,6 +1377,30 @@ function renderPackConfirmationItems(modules) {
     }).join('');
 }
 
+function renderPackConfirmationSummary(payload) {
+    const networkType = payload.packageType.offline ? '离线' : '在线';
+    return `
+        <section class="pack-confirm-summary" aria-label="打包参数确认">
+            <div class="pack-confirm-key pack-confirm-package-type">
+                <span>包类型</span>
+                <strong>${escapeHtml(payload.packageType.label)}</strong>
+            </div>
+            <div class="pack-confirm-key pack-confirm-network-type">
+                <span>网络类型</span>
+                <strong>${networkType}</strong>
+            </div>
+            <div class="pack-confirm-key pack-confirm-cpu">
+                <span>CPU 架构</span>
+                <strong>${escapeHtml(payload.support_cpu)}</strong>
+            </div>
+            <div class="pack-confirm-secondary">
+                <span>命名空间 <strong>${escapeHtml(payload.namespace)}</strong></span>
+                <span>上传云盘 <strong>${payload.seafile ? '是' : '否'}</strong></span>
+            </div>
+        </section>
+    `;
+}
+
 function alignPackConfirmationNames(body) {
     const names = [...body.querySelectorAll('.pack-confirm-item > span')];
     const maxWidth = Math.max(...names.map(name => name.scrollWidth), 0);
@@ -1454,8 +1478,7 @@ function showPackConfirmation(payload) {
     body.className = 'modal-body pack-confirm-modal';
     body.innerHTML = `
         <h3>确认开始打包</h3>
-        <p class="muted">包类型：${escapeHtml(payload.packageType.label)}</p>
-        <p class="muted">网络类型：${payload.packageType.offline ? '离线' : '在线'}　CPU 架构：${escapeHtml(payload.support_cpu)}　命名空间：${escapeHtml(payload.namespace)}　上传云盘：${payload.seafile ? '是' : '否'}</p>
+        ${renderPackConfirmationSummary(payload)}
         <p class="muted">请确认以下组件及分支，确认后将提交打包任务。</p>
         <ul class="pack-confirm-list">${renderPackConfirmationItems(payload.modules)}</ul>
         <div class="modal-actions">

@@ -365,6 +365,17 @@ console.log('PASS: favorite projects use local pagination');
     assert.match(confirmationItems, /etl/);
     assert.match(confirmationItems, /hotfix\/42/);
     console.log('PASS: pack confirmation lists each selected module and branch');
+
+    const confirmationSummary = vm.runInContext(`renderPackConfirmationSummary({
+        packageType: getPackageType('install', true),
+        support_cpu: 'x86_64', namespace: 'basic-app', seafile: false,
+    })`, context);
+    assert.match(confirmationSummary, /pack-confirm-key/);
+    assert.match(confirmationSummary, /离线安装包/);
+    assert.match(confirmationSummary, /网络类型/);
+    assert.match(confirmationSummary, /CPU 架构/);
+    assert.match(confirmationSummary, /x86_64/);
+    console.log('PASS: pack confirmation highlights package type, network type, and CPU architecture');
 })().catch((error) => {
     console.error(error);
     process.exitCode = 1;
