@@ -697,6 +697,8 @@ function showBranchDialog(mod, rowElement, gitUrl, refs) {
     overlay.style.display = 'flex';
     const branchInput = document.getElementById('branchInput');
     const branchOptions = document.getElementById('branchOptions');
+    let selectedBranch = '';
+    let selectedGitConfig = null;
 
     const syncBranchOptions = () => {
         const keyword = branchInput.value.trim().toLowerCase();
@@ -706,12 +708,31 @@ function showBranchDialog(mod, rowElement, gitUrl, refs) {
     };
 
     branchInput.onfocus = () => branchOptions.classList.add('open');
-    branchInput.oninput = syncBranchOptions;
+    branchInput.oninput = () => {
+        selectedBranch = '';
+        selectedGitConfig = null;
+        syncBranchOptions();
+    };
+    const selectBranch = async (value) => {
+        const branch = String(value || '').trim();
+        if (!branch) return;
+        branchInput.value = branch;
+        branchOptions.classList.remove('open');
+        selectedBranch = '';
+        selectedGitConfig = null;
+        setBranchSaveLoading(confirmButton, cancelButton, true, '正在查询...');
+        try {
+            selectedGitConfig = await getBranchGitConfig(gitUrl, branch);
+            selectedBranch = branch;
+        } catch (err) {
+            showRequestError('查询分支信息失败', err);
+        } finally {
+            setBranchSaveLoading(confirmButton, cancelButton, false);
+        }
+    };
+    branchInput.onchange = () => selectBranch(branchInput.value);
     branchOptions.querySelectorAll('.branch-option').forEach(option => {
-        option.onclick = () => {
-            branchInput.value = option.dataset.value;
-            branchOptions.classList.remove('open');
-        };
+        option.onclick = () => selectBranch(option.dataset.value);
     });
     const cancelButton = document.getElementById('branchCancel');
     const confirmButton = document.getElementById('branchConfirm');
@@ -722,9 +743,13 @@ function showBranchDialog(mod, rowElement, gitUrl, refs) {
             showError('无法修改分支', '目标分支不能为空。');
             return;
         }
+        if (branch !== selectedBranch || !selectedGitConfig) {
+            showError('无法修改分支', '请先选择或确认目标分支，以查询其 Git 配置。');
+            return;
+        }
         setBranchSaveLoading(confirmButton, cancelButton, true);
         try {
-            await updateModuleBranch(mod, rowElement, gitUrl, branch);
+            await updateModuleBranch(mod, rowElement, gitUrl, branch, selectedGitConfig);
             closeModal();
         } catch (err) {
             showRequestError('修改分支失败', err);
@@ -733,23 +758,42 @@ function showBranchDialog(mod, rowElement, gitUrl, refs) {
     };
 }
 
-function setBranchSaveLoading(confirmButton, cancelButton, loading) {
+function setBranchSaveLoading(confirmButton, cancelButton, loading, loadingText = '正在保存...') {
     confirmButton.disabled = loading;
     cancelButton.disabled = loading;
-    confirmButton.textContent = loading ? '正在保存...' : '确认修改';
+    confirmButton.textContent = loading ? loadingText : '确认修改';
 }
 
-async function updateModuleBranch(mod, rowElement, gitUrl, branch) {
+async function getBranchGitConfig(gitUrl, branch) {
+    const result = await ApiClient.getGitConfig(gitUrl, branch);
+    if (result?.resultCode !== null && result?.resultCode !== undefined && result.resultCode !== 0) {
+        throw new Error(result.message || '查询分支 Git 配置失败。');
+    }
+    const gitConfig = result?.data ?? result ?? {};
+    if (!gitConfig.git_id) throw new Error('分支 Git 配置中缺少 git_id。');
+    return gitConfig;
+}
+
+function moduleServiceType(mod) {
+    const value = mod.service_type;
+    const rawValue = value && typeof value === 'object'
+        ? (value.id ?? value.pk ?? value.value)
+        : value;
+    if (rawValue === null || rawValue === undefined || rawValue === '') return 1;
+    const serviceType = Number(rawValue);
+    if (!Number.isInteger(serviceType)) throw new Error('当前服务的 service_type 必须为整数。');
+    return serviceType;
+}
+
+async function updateModuleBranch(mod, rowElement, gitUrl, branch, gitConfig) {
     const serviceName = pick(mod, 'name', 'module_name');
-    const gitId = mod.git_url && typeof mod.git_url === 'object'
-        ? (mod.git_url.id ?? mod.git_url.pk ?? mod.git_url.git_url)
-        : mod.git_url;
-    if (!gitId) throw new Error('当前服务缺少 git_url 字段。');
+    const gitId = gitConfig.git_id;
+    if (!gitId) throw new Error('分支 Git 配置中缺少 git_id。');
 
     const payload = {
         name: serviceName,
         custom_name: pick(mod, 'custom_name') || serviceName,
-        service_type: mod.service_type ?? 1,
+        service_type: moduleServiceType(mod),
         branch: branch,
         APP_ID: mod.APP_ID || serviceName,
         git_config_path: pick(mod, 'git_config_path') || 'build_ci/config.yml',

@@ -1,0 +1,24 @@
+修改组件版本（切换版本分支）
+
+调用顺序：点击切换分支时查询可用分支；选择或确认目标分支时查询该分支的 Git 配置；点击确认时仅更新组件。
+
+查询版本分支
+POST http://192.168.12.35:3000/api/v1/refs/ HTTP/1.1
+请求参数：{"git_url":"http://git.example.com/group/service.git"}
+返回参数：{"resultCode":0,"message":"","data":{"branches":["master","release/1.0"],"tags":[]}}
+
+说明：从 data.branches 和 data.tags 中取得可选分支或标签。
+
+查询版本的 Git 配置
+POST http://192.168.12.35:3000/api/v1/git_config/ HTTP/1.1
+请求参数：{"git_url":"http://git.example.com/group/service.git","branch":"release/1.0"}
+返回参数：{"resultCode":0,"message":"","data":{"git_id":1132,"git_message":[{"service_name":"service","git_config_path":"build_ci/config.yml"}]}}
+
+说明：更新组件时必须使用 data.git_id 作为 git_url 字段的值，不能直接使用查询分支时传入的 Git 地址。
+
+切换版本分支
+PUT http://192.168.12.35:3000/api/v1/module/36498 HTTP/1.1
+请求参数：{"name":"service","custom_name":"service","service_type":1,"branch":"release/1.0","APP_ID":"service","git_config_path":"build_ci/config.yml","is_image":true,"version":"2451","git_url":1132}
+返回参数：{"id":36498,"name":"service","branch":"release/1.0","version":2451,"git_url":1132}
+
+说明：请求需携带 Authorization: Token <token>。module ID、version、组件名称及其他组件属性应取自当前组件数据；service_type 必须为整型。

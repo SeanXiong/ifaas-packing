@@ -280,7 +280,7 @@ console.log('PASS: favorite projects use local pagination');
     let updatedModuleId = null;
     let updatedPayload = null;
     context.ApiClient.getGitConfig = async () => {
-        throw new Error('切换分支不应额外请求 git_config');
+        throw new Error('确认修改时不应查询 git_config');
     };
     context.ApiClient.updateModule = async (moduleId, payload) => {
         updatedModuleId = moduleId;
@@ -302,11 +302,11 @@ console.log('PASS: favorite projects use local pagination');
         id: 21790,
         name: 'etl-vedio-structure-mq',
         custom_name: 'etl-vedio-structure-mq',
-        service_type: 1,
+        service_type: { id: '1', name: '普通服务' },
         APP_ID: 'etl-vedio-structure-mq',
         git_config_path: 'build_ci/config.yml',
         is_image: true,
-        git_url: 154,
+        git_url: 1132,
     };
     const branchText = { textContent: '' };
     const moduleRow = { querySelector: selector => selector === '.branch-text' ? branchText : null };
@@ -314,7 +314,7 @@ console.log('PASS: favorite projects use local pagination');
     context.testModuleRow = moduleRow;
     vm.runInContext('state.currentVersion = { id: 1734 }', context);
     await vm.runInContext(
-        "updateModuleBranch(testModule, testModuleRow, 'ignored-git-url', 'rel_1.6.2_DeepSea_hotfix_tianfu')",
+        "updateModuleBranch(testModule, testModuleRow, 'ignored-git-url', 'rel_1.6.2_DeepSea_hotfix_tianfu', { git_id: 1132 })",
         context,
     );
     assert.equal(updatedModuleId, '21790');
@@ -327,7 +327,7 @@ console.log('PASS: favorite projects use local pagination');
         git_config_path: 'build_ci/config.yml',
         is_image: true,
         version: '1734',
-        git_url: 154,
+        git_url: 1132,
     });
     assert.equal(module.git_url, 154);
     assert.equal(branchText.textContent, 'rel_1.6.2_DeepSea_hotfix_tianfu');

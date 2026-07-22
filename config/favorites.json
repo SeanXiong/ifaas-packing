@@ -1,14 +1,162 @@
 {
   "accounts": {
     "sujiangang": {
-      "project_ids": [
-        "345",
-        "484",
-        "511",
-        "554",
-        "564",
-        "589",
-        "594"
+      "projects": [
+        {
+          "id": 345,
+          "name": "深海外部支撑打包项目",
+          "description": null,
+          "created_time": "2023-04-13 09:44:13",
+          "updated_time": "2023-04-13 09:44:13",
+          "product": {
+            "id": 1,
+            "name": "深海",
+            "description": "深海产品",
+            "created_time": "2020-03-19 18:30:19",
+            "updated_time": "2020-03-19 18:30:19",
+            "creator": 74
+          },
+          "creator": {
+            "id": 128,
+            "password": "pbkdf2_sha256$150000$3dcVr0fzTuBU$wdA6dwvX6UwdcEg7WtT7NfJOgbHfC5+x037htVBqlm8=",
+            "last_login": "2026-07-22 10:53:43",
+            "is_superuser": false,
+            "username": "sujiangang",
+            "first_name": "",
+            "last_name": "",
+            "email": "su.jiangang@intellif.com",
+            "is_staff": false,
+            "is_active": true,
+            "date_joined": "2019-12-21 17:01:54",
+            "groups": [
+              33
+            ],
+            "user_permissions": []
+          }
+        },
+        {
+          "id": 484,
+          "name": "监所外部支撑打包项目",
+          "description": null,
+          "created_time": "2024-07-11 10:52:04",
+          "updated_time": "2024-07-11 10:52:04",
+          "product": 1,
+          "creator": 128
+        },
+        {
+          "id": 511,
+          "name": "城管外部支撑打包项目",
+          "description": null,
+          "created_time": "2025-05-06 11:08:30",
+          "updated_time": "2025-05-06 11:08:30",
+          "product": {
+            "id": 182,
+            "name": "城管基线",
+            "description": null,
+            "created_time": "2023-08-15 14:38:44",
+            "updated_time": "2023-08-15 14:38:44",
+            "creator": 78
+          },
+          "creator": {
+            "id": 128,
+            "password": "pbkdf2_sha256$150000$3dcVr0fzTuBU$wdA6dwvX6UwdcEg7WtT7NfJOgbHfC5+x037htVBqlm8=",
+            "last_login": "2026-07-22 10:53:43",
+            "is_superuser": false,
+            "username": "sujiangang",
+            "first_name": "",
+            "last_name": "",
+            "email": "su.jiangang@intellif.com",
+            "is_staff": false,
+            "is_active": true,
+            "date_joined": "2019-12-21 17:01:54",
+            "groups": [
+              33
+            ],
+            "user_permissions": []
+          }
+        },
+        {
+          "id": 554,
+          "name": "电动车外部支撑打包项目",
+          "description": null,
+          "created_time": "2025-08-22 14:36:11",
+          "updated_time": "2025-08-22 14:36:11",
+          "product": {
+            "id": 1,
+            "name": "深海",
+            "description": "深海产品",
+            "created_time": "2020-03-19 18:30:19",
+            "updated_time": "2020-03-19 18:30:19",
+            "creator": 74
+          },
+          "creator": {
+            "id": 128,
+            "password": "pbkdf2_sha256$150000$3dcVr0fzTuBU$wdA6dwvX6UwdcEg7WtT7NfJOgbHfC5+x037htVBqlm8=",
+            "last_login": "2026-07-22 10:53:43",
+            "is_superuser": false,
+            "username": "sujiangang",
+            "first_name": "",
+            "last_name": "",
+            "email": "su.jiangang@intellif.com",
+            "is_staff": false,
+            "is_active": true,
+            "date_joined": "2019-12-21 17:01:54",
+            "groups": [
+              33
+            ],
+            "user_permissions": []
+          }
+        },
+        {
+          "id": 564,
+          "name": "道路巡检外部打包项目",
+          "description": null,
+          "created_time": "2025-10-23 10:09:34",
+          "updated_time": "2025-10-23 10:09:34",
+          "product": 95,
+          "creator": 128
+        },
+        {
+          "id": 589,
+          "name": "算法仓外部支撑打包项目",
+          "description": null,
+          "created_time": "2026-03-25 15:08:44",
+          "updated_time": "2026-03-25 15:08:44",
+          "product": 132,
+          "creator": 128
+        },
+        {
+          "id": 594,
+          "name": "外部-工具",
+          "description": null,
+          "created_time": "2026-04-10 11:51:05",
+          "updated_time": "2026-04-10 11:51:05",
+          "product": {
+            "id": 254,
+            "name": "nacos",
+            "description": null,
+            "created_time": "2025-11-06 15:58:16",
+            "updated_time": "2025-11-06 15:58:16",
+            "creator": 239
+          },
+          "creator": {
+            "id": 128,
+            "password": "pbkdf2_sha256$150000$3dcVr0fzTuBU$wdA6dwvX6UwdcEg7WtT7NfJOgbHfC5+x037htVBqlm8=",
+            "last_login": "2026-07-22 10:53:43",
+            "is_superuser": false,
+            "username": "sujiangang",
+            "first_name": "",
+            "last_name": "",
+            "email": "su.jiangang@intellif.com",
+            "is_staff": false,
+            "is_active": true,
+            "date_joined": "2019-12-21 17:01:54",
+            "groups": [
+              33
+            ],
+            "user_permissions": []
+          }
+        }
       ]
     }
   }
