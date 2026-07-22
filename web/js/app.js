@@ -1081,14 +1081,21 @@ function renderArtifactCard(record, packageType = state.currentRecordType) {
                 <div class="artifact-address-row">
                     <span class="address-label">内网地址</span>
                     <span class="address-value" title="${escapeHtml(record.downloadPath || '-')}">${escapeHtml(record.downloadPath || '-')}</span>
-                    <button class="btn btn-sm copy-intranet-btn" ${record.downloadPath ? '' : 'disabled'}>复制</button>
+                    <div class="artifact-address-actions">
+                        ${record.downloadPath
+                            ? `<a class="btn btn-sm download-intranet-btn" href="${escapeHtml(record.downloadPath)}" download="${escapeHtml(fileNameFromPath(record.downloadPath))}">下载</a>`
+                            : '<button class="btn btn-sm download-intranet-btn" disabled>下载</button>'}
+                        <button class="btn btn-sm copy-intranet-btn" ${record.downloadPath ? '' : 'disabled'}>复制</button>
+                    </div>
                 </div>
                 <div class="artifact-address-row">
                     <span class="address-label">云盘地址</span>
                     <span class="address-value" title="${escapeHtml(record.hasSeafile ? record.seafilePath : '暂无云盘地址')}">${escapeHtml(record.hasSeafile ? record.seafilePath : '暂无云盘地址')}</span>
-                    ${record.hasSeafile
-                        ? '<button class="btn btn-sm copy-extranet-btn">复制</button>'
-                        : (canUpload ? '<button class="btn btn-sm upload-seafile-btn">上传云盘</button>' : '')}
+                    <div class="artifact-address-actions">
+                        ${record.hasSeafile
+                            ? '<button class="btn btn-sm copy-extranet-btn">复制</button>'
+                            : (canUpload ? '<button class="btn btn-sm upload-seafile-btn">上传云盘</button>' : '')}
+                    </div>
                 </div>
             </div>
             <div class="upload-progress" style="display:none">

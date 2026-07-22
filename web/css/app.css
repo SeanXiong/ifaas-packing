@@ -887,10 +887,20 @@ body.resizing-columns {
 
 .artifact-address-row {
     display: grid;
-    grid-template-columns: 72px minmax(0, 1fr) 84px;
+    grid-template-columns: 72px minmax(0, 1fr) auto;
     align-items: center;
     gap: 10px;
     min-width: 0;
+}
+
+.artifact-address-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.artifact-address-actions .btn {
+    min-width: 84px;
 }
 
 .address-label {

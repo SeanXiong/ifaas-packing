@@ -141,6 +141,15 @@ const onlineCard = vm.runInContext(`renderArtifactCard({
     namespace: '-', supportOs: '-', platform: '-', offline: '在线', seafile: 'false', fileMd5: '-',
 }, getPackageType('install', false))`, context);
 assert.doesNotMatch(onlineCard, /upload-seafile-btn/);
+const downloadableCard = vm.runInContext(`renderArtifactCard({
+    index: 1, status: { className: '', label: '成功' }, packageName: 'release.tar.gz',
+    builder: 'tester', modules: [], supportCpu: 'x86_64', createdTime: '-', recordId: 2,
+    downloadPath: 'http://files.example.com/releases/release.tar.gz', hasSeafile: false, seafilePath: '', storagePath: '/tmp/release.tar.gz',
+    namespace: '-', supportOs: '-', platform: '-', offline: '在线', seafile: 'false', fileMd5: '-',
+})`, context);
+assert.match(downloadableCard, /download-intranet-btn/);
+assert.match(downloadableCard, /href="http:\/\/files\.example\.com\/releases\/release\.tar\.gz"/);
+assert.ok(downloadableCard.indexOf('download-intranet-btn') < downloadableCard.indexOf('copy-intranet-btn'));
 const moduleCards = vm.runInContext(`renderArtifactModules({
     index: 0,
     modules: [{ id: 21790, name: 'gateway', ref_name: 'release/1.2.0', need_apollo: true }],
