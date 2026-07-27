@@ -77,7 +77,7 @@ function getNetworkTypes() {
 
 function getDefaultPackParameters() {
     return {
-        family: 'install',
+        family: 'upgrade',
         offline: true,
         support_cpu: 'x86_64',
         namespace: 'basic-app',
@@ -1416,19 +1416,22 @@ function showPackageFamilySelection(payload) {
         <h3>打包参数</h3>
         <div class="form-card pack-parameter-form">
             <div class="form-row"><span class="label">包类型</span>
-                <select id="packageFamilySelect" class="form-select">
-                    <option value="install">安装包</option><option value="upgrade">升级包</option>
-                </select>
+                <div class="pack-checkbox-group" data-pack-option-group="family" role="group" aria-label="包类型">
+                    <label class="pack-checkbox-option"><input type="checkbox" name="packageFamily" value="upgrade" checked><span>升级包</span></label>
+                    <label class="pack-checkbox-option"><input type="checkbox" name="packageFamily" value="install"><span>安装包</span></label>
+                </div>
             </div>
             <div class="form-row"><span class="label">网络类型</span>
-                <select id="packageNetworkSelect" class="form-select">
-                    <option value="offline">离线</option><option value="online">在线</option>
-                </select>
+                <div class="pack-checkbox-group" data-pack-option-group="network" role="group" aria-label="网络类型">
+                    <label class="pack-checkbox-option"><input type="checkbox" name="packageNetwork" value="offline" checked><span>离线</span></label>
+                    <label class="pack-checkbox-option"><input type="checkbox" name="packageNetwork" value="online"><span>在线</span></label>
+                </div>
             </div>
             <div class="form-row"><span class="label">CPU 架构</span>
-                <select id="packageCpuSelect" class="form-select">
-                    <option value="x86_64">x86_64</option><option value="aarch64">aarch64</option>
-                </select>
+                <div class="pack-checkbox-group" data-pack-option-group="cpu" role="group" aria-label="CPU 架构">
+                    <label class="pack-checkbox-option"><input type="checkbox" name="packageCpu" value="x86_64" checked><span>x86_64</span></label>
+                    <label class="pack-checkbox-option"><input type="checkbox" name="packageCpu" value="aarch64"><span>aarch64</span></label>
+                </div>
             </div>
             <div class="form-row"><span class="label">命名空间</span>
                 <input id="packageNamespaceInput" class="form-input" value="${defaults.namespace}">
@@ -1446,26 +1449,47 @@ function showPackageFamilySelection(payload) {
     `;
     overlay.style.display = 'flex';
     document.getElementById('packageFamilyCancel').onclick = closeModal;
-    const networkSelect = document.getElementById('packageNetworkSelect');
+    const optionGroups = [...body.querySelectorAll('[data-pack-option-group]')];
+    optionGroups.forEach(group => {
+        group.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+            checkbox.onchange = () => {
+                if (!checkbox.checked) {
+                    checkbox.checked = true;
+                    return;
+                }
+                group.querySelectorAll('input[type="checkbox"]').forEach(option => {
+                    if (option !== checkbox) option.checked = false;
+                });
+                if (group.dataset.packOptionGroup === 'network') syncSeafile();
+            };
+        });
+    });
+    const getSelectedOption = groupName =>
+        body.querySelector(`[data-pack-option-group="${groupName}"] input[type="checkbox"]:checked`)?.value || '';
     const seafileToggle = document.getElementById('packageSeafileToggle');
     const seafileWrap = document.getElementById('packageSeafileToggleWrap');
     const syncSeafile = () => {
-        const enabled = networkSelect.value === 'offline';
+        const enabled = getSelectedOption('network') === 'offline';
         seafileToggle.disabled = !enabled;
         if (!enabled) seafileToggle.checked = false;
         seafileWrap.classList.toggle('toggle-disabled', !enabled);
     };
-    networkSelect.onchange = syncSeafile;
     syncSeafile();
     document.getElementById('packageParameterNext').onclick = () => {
-        const family = document.getElementById('packageFamilySelect').value;
-        const offline = networkSelect.value === 'offline';
+        const family = getSelectedOption('family');
+        const network = getSelectedOption('network');
+        const supportCpu = getSelectedOption('cpu');
+        if (!family || !network || !supportCpu) {
+            showError('参数不完整', '包类型、网络类型和 CPU 架构均为必选项。');
+            return;
+        }
+        const offline = network === 'offline';
         const packageType = getPackageType(family, offline);
         showPackConfirmation({
             ...payload,
             packageType,
             offline: offline ? 1 : 0,
-            support_cpu: document.getElementById('packageCpuSelect').value,
+            support_cpu: supportCpu,
             namespace: document.getElementById('packageNamespaceInput').value.trim() || defaults.namespace,
             seafile: isSeafileUploadAllowed(packageType) && seafileToggle.checked,
         });

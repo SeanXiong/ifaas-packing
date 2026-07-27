@@ -845,6 +845,37 @@ body.resizing-columns {
     width: 240px;
     min-width: 0;
 }
+.pack-checkbox-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 240px;
+}
+.pack-checkbox-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 7px 10px;
+    border: 1px solid var(--border-hover);
+    border-radius: 9px;
+    color: var(--text-secondary);
+    background: var(--surface);
+    cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+.pack-checkbox-option:hover {
+    border-color: #93c5fd;
+}
+.pack-checkbox-option:has(input:checked) {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: rgba(37, 99, 235, 0.08);
+}
+.pack-checkbox-option input {
+    margin: 0;
+    accent-color: var(--primary);
+}
 .pack-parameter-form .toggle-wrap { align-self: center; }
 
 .toggle-track input:disabled + * { cursor: not-allowed; }
