@@ -83,11 +83,46 @@ async function testLogoutUsesDocumentedEndpoint() {
     assert.equal(requests[0].options.method, 'GET');
 }
 
+async function testDeleteModuleUsesModuleEndpoint() {
+    const requests = [];
+    context.fetch = async (url, options) => {
+        requests.push({ url, options });
+        return { ok: true, status: 204, text: async () => '' };
+    };
+
+    await vm.runInContext('ApiClient.deleteModule(12233)', context);
+    assert.equal(requests[0].url, '/api/proxy/api/v1/module/12233');
+    assert.equal(requests[0].options.method, 'DELETE');
+    assert.equal(requests[0].options.body, undefined);
+}
+
+async function testUpdateModulePortUsesDocumentedPayload() {
+    const requests = [];
+    context.fetch = async (url, options) => {
+        requests.push({ url, options });
+        return { ok: true, text: async () => JSON.stringify({ id: 13144 }) };
+    };
+    const payload = {
+        version: 975,
+        module: 12232,
+        default_port: '9011',
+        mapping_port: '1111',
+    };
+
+    context.modulePortPayload = payload;
+    await vm.runInContext('ApiClient.updateModulePort(13144, modulePortPayload)', context);
+    assert.equal(requests[0].url, '/api/proxy/api/v1/moduleport/13144');
+    assert.equal(requests[0].options.method, 'PUT');
+    assert.deepEqual(JSON.parse(requests[0].options.body), payload);
+}
+
 (async () => {
     await testGetProjectsPageRequestsOnlyOnePage();
     await testInvalidTokenResponseIsAuthenticationError();
     await testInstallationPackageUsesInstallationResources();
     await testLogoutUsesDocumentedEndpoint();
+    await testDeleteModuleUsesModuleEndpoint();
+    await testUpdateModulePortUsesDocumentedPayload();
     console.log('PASS: project page requests and invalid Token handling');
 })().catch((error) => {
     console.error(error);

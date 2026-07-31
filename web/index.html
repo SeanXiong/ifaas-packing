@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>项目打包客户端</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="css/app.css?v=202607201910">
+    <link rel="stylesheet" href="css/app.css?v=2026073117">
 </head>
 <body>
 
@@ -83,6 +83,8 @@
         <!-- ============ 中栏：版本选择 ============ -->
         <div class="card splitter-panel">
             <h3>版本选择</h3>
+            <input type="text" id="versionSearch" class="form-input search-input"
+                   placeholder="搜索版本...">
             <p id="versionHint" class="hint">请选择左侧项目</p>
             <div id="versionList" class="list-scroll"></div>
         </div>
@@ -136,13 +138,29 @@
     </div>
 </div>
 
+<!-- 系统确认弹窗 -->
+<div id="confirmOverlay" class="modal-overlay confirm-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+    <div class="modal-body confirm-dialog">
+        <div id="confirmIcon" class="confirm-icon" aria-hidden="true">!</div>
+        <div class="confirm-content">
+            <h3 id="confirmTitle">操作确认</h3>
+            <p id="confirmMessage">请确认是否继续当前操作。</p>
+        </div>
+        <div class="modal-actions confirm-actions">
+            <button type="button" id="confirmCancel" class="btn btn-secondary">取消</button>
+            <button type="button" id="confirmSubmit" class="btn btn-primary">确认</button>
+        </div>
+    </div>
+</div>
+
 <!-- ================================================================
      JavaScript
      ================================================================ -->
     <script src="js/utils.js?v=202607201910"></script>
     <script src="js/config.js?v=202607201910"></script>
-    <script src="js/api.js?v=202607201910"></script>
-    <script src="js/app.js?v=202607201910"></script>
+    <script src="js/api.js?v=2026073111"></script>
+    <script src="js/app.js?v=2026073118"></script>
 
 </body>
 </html>

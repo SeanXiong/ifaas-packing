@@ -21,7 +21,7 @@ const state = {
     favorites: new Set(),
     uploadTasks: {},          // taskId -> PackageRecord 映射
     uploadTimer: null,        // 上传进度轮询定时器
-    currentRecordType: { family: 'install', offline: true },
+    currentRecordType: { family: 'upgrade', offline: true },
 };
 
 const SESSION_TOKEN_KEY = 'ifaas-packing.token';
@@ -437,6 +437,7 @@ async function selectProject(project) {
     state.currentProject = project;
     state.currentVersion = null;
     updateProjectSelection();
+    document.getElementById('versionSearch').value = '';
     document.getElementById('versionList').innerHTML = '';
     clearModules();
 
@@ -465,6 +466,7 @@ function renderVersions(versions) {
         const row = createVersionRow(version);
         list.appendChild(row);
     }
+    filterVersions();
 }
 
 function createVersionRow(version) {
@@ -476,6 +478,7 @@ function createVersionRow(version) {
         div.classList.toggle('selected', objectId(state.currentVersion || {}) === vid);
     }
     const name = pick(version, 'update_version', '未命名版本');
+    div.dataset.searchText = name.toLowerCase();
     div.innerHTML = `
         <span class="row-name">${escapeHtml(name)}</span>
         <button class="btn btn-sm version-records-btn">打包记录</button>
@@ -486,6 +489,13 @@ function createVersionRow(version) {
     };
     div.onclick = () => selectVersion(version);
     return div;
+}
+
+function filterVersions() {
+    const keyword = document.getElementById('versionSearch').value.trim().toLowerCase();
+    document.querySelectorAll('#versionList .version-row').forEach(row => {
+        row.style.display = !keyword || row.dataset.searchText.includes(keyword) ? '' : 'none';
+    });
 }
 
 function updateVersionSelection() {
@@ -500,7 +510,8 @@ async function viewVersionRecords(version, triggerButton) {
     updateVersionSelection();
     const versionName = pick(version, 'update_version', '当前版本');
     document.getElementById('packageHint').textContent = `当前版本：${versionName}`;
-    await loadPackageRecords(triggerButton);
+    const defaultRecordType = selectPackageRecordType(getPackageType('upgrade', true));
+    await loadPackageRecords(triggerButton, defaultRecordType);
 }
 
 /* ================================================================
@@ -564,18 +575,209 @@ function createModuleRow(mod, index) {
             <span class="row-name">${escapeHtml(name)}</span>
         </label>
         <span class="module-version-cell branch-text">${escapeHtml(branch)}</span>
-        <button class="btn btn-sm edit-branch-btn">切换分支</button>
+        <div class="module-actions-cell">
+            <button class="btn btn-sm edit-branch-btn">切换分支</button>
+            <button class="btn btn-sm module-ports-btn">端口列表</button>
+            <button class="btn btn-sm btn-danger delete-module-btn">删除</button>
+        </div>
     `;
 
     const checkbox = div.querySelector('.module-checkbox');
     checkbox.onchange = () => syncSelectAllState();
+
+    div.querySelector('.module-ports-btn').onclick = (e) => {
+        e.stopPropagation();
+        showModulePorts(mod);
+    };
 
     div.querySelector('.edit-branch-btn').onclick = (e) => {
         e.stopPropagation();
         changeModuleBranch(mod, div);
     };
 
+    div.querySelector('.delete-module-btn').onclick = (e) => {
+        e.stopPropagation();
+        deleteModule(mod, div);
+    };
+
     return div;
+}
+
+function getModulePorts(mod) {
+    const portDetails = mod?.port_details;
+    if (Array.isArray(portDetails)) {
+        return portDetails.filter(port => port && typeof port === 'object');
+    }
+    return portDetails && typeof portDetails === 'object' ? [portDetails] : [];
+}
+
+function showModulePorts(mod) {
+    const ports = getModulePorts(mod);
+    const serviceName = pick(mod, 'custom_name', 'name', 'module_name', '当前服务');
+    const body = document.getElementById('modalBody');
+    body.className = 'modal-body port-modal';
+    body.innerHTML = `
+        <div class="port-modal-header">
+            <div>
+                <span class="port-modal-eyebrow">组件端口映射</span>
+                <h3>${escapeHtml(serviceName)} 端口列表</h3>
+            </div>
+            <div class="port-modal-header-actions">
+                <span class="port-count">${ports.length} 个端口</span>
+                <button type="button" class="port-modal-close" title="关闭" aria-label="关闭">✕</button>
+            </div>
+        </div>
+        <div class="port-list">
+            ${ports.length ? ports.map((port, index) => `
+                <div class="port-item" data-port-index="${index}">
+                    <div class="port-source">
+                        <span class="port-field-label">原端口</span>
+                        <strong>${escapeHtml(pick(port, 'default_port') || '-')}</strong>
+                    </div>
+                    <span class="port-map-arrow" aria-hidden="true">→</span>
+                    <label class="port-target">
+                        <span class="port-field-label">映射端口</span>
+                        <input type="text" inputmode="numeric" class="form-input port-mapping-input"
+                               value="${escapeHtml(pick(port, 'mapping_port'))}"
+                               placeholder="请输入映射端口" maxlength="5">
+                    </label>
+                </div>
+            `).join('') : `
+                <div class="port-empty">
+                    <span class="port-empty-icon">↔</span>
+                    <strong>暂无端口配置</strong>
+                    <p>当前业务组件未返回可编辑的端口记录。</p>
+                </div>
+            `}
+        </div>
+        <div class="modal-actions port-modal-actions">
+            <button type="button" class="btn btn-secondary port-cancel-btn">取消</button>
+            <button type="button" class="btn btn-primary save-ports-btn" ${ports.length ? '' : 'disabled'}>保存</button>
+        </div>
+    `;
+
+    document.getElementById('modalOverlay').style.display = 'flex';
+    body.querySelector('.port-modal-close').onclick = closeModal;
+    body.querySelector('.port-cancel-btn').onclick = closeModal;
+    body.querySelector('.save-ports-btn').onclick = () => saveModulePorts(mod, ports, body);
+    body.querySelectorAll('.port-item').forEach(row => {
+        const input = row.querySelector('.port-mapping-input');
+        input.onkeydown = (event) => {
+            if (event.key === 'Enter') saveModulePorts(mod, ports, body);
+        };
+    });
+}
+
+function isValidPort(value) {
+    return /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535;
+}
+
+async function saveModulePorts(mod, ports, body) {
+    const rows = [...body.querySelectorAll('.port-item')];
+    const saveButton = body.querySelector('.save-ports-btn');
+    const updates = [];
+
+    for (const row of rows) {
+        const port = ports[Number(row.dataset.portIndex)];
+        const portId = pick(port, 'id', 'pk');
+        const versionId = pick(port, 'version') || objectId(state.currentVersion || {});
+        const mid = pick(port, 'module') || moduleId(mod);
+        const defaultPort = pick(port, 'default_port') || pick(mod, 'port');
+        const input = row.querySelector('.port-mapping-input');
+        const mappingPort = input.value.trim();
+
+        if (!portId || !versionId || !mid || !defaultPort) {
+            showError('端口修改失败', '当前端口记录缺少 id、version、module 或 default_port 字段。');
+            return false;
+        }
+        if (!isValidPort(mappingPort)) {
+            showError('端口格式错误', '映射端口请输入 1 至 65535 之间的整数。');
+            input.focus();
+            return false;
+        }
+        updates.push({
+            port,
+            portId,
+            defaultPort,
+            mappingPort,
+            input,
+            payload: {
+                version: Number(versionId),
+                module: Number(mid),
+                default_port: defaultPort,
+                mapping_port: mappingPort,
+            },
+        });
+    }
+
+    const inputs = updates.map(update => update.input);
+    inputs.forEach(input => {
+        input.disabled = true;
+    });
+    saveButton.disabled = true;
+    saveButton.textContent = '保存中...';
+    try {
+        for (const update of updates) {
+            const result = await ApiClient.updateModulePort(update.portId, update.payload);
+            if (result?.resultCode !== null && result?.resultCode !== undefined && result.resultCode !== 0) {
+                throw new Error(result.message || '修改端口映射失败。');
+            }
+            const updatedPort = result?.data && typeof result.data === 'object' ? result.data : result;
+            if (updatedPort && typeof updatedPort === 'object') Object.assign(update.port, updatedPort);
+            update.port.mapping_port = pick(updatedPort || {}, 'mapping_port') || update.mappingPort;
+        }
+        showSuccess('端口修改成功', `已保存 ${updates.length} 条端口映射。`);
+        closeModal();
+        return true;
+    } catch (err) {
+        showRequestError('端口修改失败', err);
+        return false;
+    } finally {
+        inputs.forEach(input => {
+            input.disabled = false;
+        });
+        saveButton.disabled = false;
+        saveButton.textContent = '保存';
+    }
+}
+
+async function deleteModule(mod, rowElement) {
+    const mid = moduleId(mod);
+    if (!mid) {
+        showError('删除失败', '当前服务缺少 pk/id 字段。');
+        return;
+    }
+
+    const serviceName = pick(mod, 'name', 'module_name', '当前服务');
+    const confirmed = await showConfirmDialog({
+        title: '删除业务组件',
+        message: `删除后将无法恢复，确认删除“${serviceName}”？`,
+        confirmText: '确认删除',
+        danger: true,
+    });
+    if (!confirmed) return;
+
+    const buttons = [...rowElement.querySelectorAll('button')];
+    const deleteButton = rowElement.querySelector('.delete-module-btn');
+    buttons.forEach(button => {
+        button.disabled = true;
+    });
+    deleteButton.textContent = '删除中...';
+
+    try {
+        await ApiClient.deleteModule(mid);
+        state.moduleRows = state.moduleRows.filter(item => item !== mod);
+        renderModules(state.moduleRows);
+        filterModules();
+        document.getElementById('packButton').disabled = !state.moduleRows.length;
+        showSuccess('删除成功', `${serviceName} 已删除。`);
+    } catch (err) {
+        buttons.forEach(button => {
+            button.disabled = false;
+        });
+        deleteButton.textContent = '删除';
+        showRequestError('删除失败', err);
+    }
 }
 
 function clearModules() {
@@ -632,9 +834,13 @@ function selectAllModules(checked) {
 function syncSelectAllState() {
     const rows = [...document.querySelectorAll('#moduleList .module-row')]
         .filter(r => r.style.display !== 'none');
-    if (!rows.length) return;
-    const allChecked = rows.every(r => r.querySelector('.module-checkbox')?.checked);
     const cb = document.getElementById('selectAllCheckbox');
+    if (!rows.length) {
+        cb.checked = false;
+        cb.indeterminate = false;
+        return;
+    }
+    const allChecked = rows.every(r => r.querySelector('.module-checkbox')?.checked);
     cb.checked = allChecked;
     cb.indeterminate = !allChecked && rows.some(r => r.querySelector('.module-checkbox')?.checked);
 }
@@ -841,29 +1047,36 @@ async function loadPackageRecords(triggerButton, packageType = state.currentReco
     if (btn) {
         btn.disabled = true;
         btn.textContent = '查询中...';
+    } else {
+        setRecordsLoading(true);
     }
 
     try {
         const records = await ApiClient.getPackageRecords(packageType.family, versionId, packageType.offline);
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = originalText;
-        }
         showRecordsDialog(records, packageType);
     } catch (err) {
+        showRequestError('升级包查询失败', err);
+    } finally {
         if (btn) {
             btn.disabled = false;
             btn.textContent = originalText;
         }
-        showRequestError('升级包查询失败', err);
+        setRecordsLoading(false);
     }
+}
+
+function setRecordsLoading(loading) {
+    const loadingOverlay = document.getElementById('recordsLoading');
+    if (!loadingOverlay) return;
+    loadingOverlay.classList.toggle('hidden', !loading);
+    document.getElementById('modalBody')?.setAttribute('aria-busy', String(loading));
 }
 
 function showRecordsDialog(records, packageType = state.currentRecordType) {
     const versionName = pick(state.currentVersion || {}, 'update_version', '当前版本');
     const overlay = document.getElementById('modalOverlay');
     const body = document.getElementById('modalBody');
-    body.className = 'modal-body modal-wide';
+    body.className = 'modal-body modal-wide records-modal';
     const recordModels = records.map((record, index) => normalizeUpdateRecord(record, index));
 
     body.innerHTML = `
@@ -885,6 +1098,12 @@ function showRecordsDialog(records, packageType = state.currentRecordType) {
             </select>
         </div>
         <div class="records-list artifact-list" id="recordsList"></div>
+        <div id="recordsLoading" class="records-loading hidden" aria-live="polite">
+            <div class="right-panel-loading-content">
+                <div class="right-panel-spinner"></div>
+                <span>打包记录查询中...</span>
+            </div>
+        </div>
         <div class="module-drawer hidden" id="moduleDrawer">
             <div class="module-drawer-mask"></div>
             <aside class="module-drawer-panel">
@@ -1058,6 +1277,13 @@ function normalizeUpdateRecord(record, index) {
     };
 }
 
+function cpuArchitectureClass(value) {
+    const architecture = String(value || '').trim().toLowerCase();
+    if (architecture.includes('aarch64') || architecture.includes('arm64')) return 'cpu-aarch64';
+    if (architecture.includes('x86')) return 'cpu-x86';
+    return 'cpu-other';
+}
+
 function renderArtifactCard(record, packageType = state.currentRecordType) {
     const canUpload = isSeafileUploadAllowed(packageType);
     return `
@@ -1071,7 +1297,7 @@ function renderArtifactCard(record, packageType = state.currentRecordType) {
                         <span>模块数：${record.modules.length}</span>
                     </div>
                 </div>
-                <span class="artifact-cpu">${escapeHtml(record.supportCpu)}</span>
+                <span class="artifact-cpu ${cpuArchitectureClass(record.supportCpu)}">${escapeHtml(record.supportCpu)}</span>
                 <span class="artifact-time">${escapeHtml(record.createdTime)}</span>
                 <div class="artifact-actions">
                     <button class="btn btn-sm btn-danger delete-record-btn" ${record.recordId ? '' : 'disabled'}>删除</button>
@@ -1193,7 +1419,13 @@ async function deletePackageRecord(card, btn, record, packageType = state.curren
         showError('删除失败', '当前打包记录缺少 id/pk 字段。');
         return false;
     }
-    if (!window.confirm('确认删除这条打包记录？')) return false;
+    const confirmed = await showConfirmDialog({
+        title: '删除打包记录',
+        message: '删除后将无法恢复，确认删除这条打包记录？',
+        confirmText: '确认删除',
+        danger: true,
+    });
+    if (!confirmed) return false;
 
     const originalText = btn.textContent;
     btn.disabled = true;
@@ -1583,6 +1815,58 @@ function buildPackPayload() {
  * 弹窗
  * ================================================================ */
 
+let activeConfirmClose = null;
+
+function showConfirmDialog({
+    title = '操作确认',
+    message = '请确认是否继续当前操作。',
+    confirmText = '确认',
+    cancelText = '取消',
+    danger = false,
+} = {}) {
+    if (activeConfirmClose) activeConfirmClose(false);
+
+    return new Promise(resolve => {
+        const overlay = document.getElementById('confirmOverlay');
+        const titleElement = document.getElementById('confirmTitle');
+        const messageElement = document.getElementById('confirmMessage');
+        const iconElement = document.getElementById('confirmIcon');
+        const cancelButton = document.getElementById('confirmCancel');
+        const confirmButton = document.getElementById('confirmSubmit');
+
+        titleElement.textContent = title;
+        messageElement.textContent = message;
+        cancelButton.textContent = cancelText;
+        confirmButton.textContent = confirmText;
+        iconElement.classList.toggle('danger', danger);
+        confirmButton.className = danger
+            ? 'btn btn-danger confirm-submit-btn'
+            : 'btn btn-primary confirm-submit-btn';
+
+        const onKeydown = event => {
+            if (event.key === 'Escape') finish(false);
+            if (event.key === 'Enter') finish(true);
+        };
+        const finish = confirmed => {
+            if (activeConfirmClose !== finish) return;
+            activeConfirmClose = null;
+            overlay.style.display = 'none';
+            document.removeEventListener('keydown', onKeydown);
+            resolve(confirmed);
+        };
+
+        activeConfirmClose = finish;
+        cancelButton.onclick = () => finish(false);
+        confirmButton.onclick = () => finish(true);
+        overlay.onclick = event => {
+            if (event.target === overlay) finish(false);
+        };
+        document.addEventListener('keydown', onKeydown);
+        overlay.style.display = 'flex';
+        requestAnimationFrame(() => confirmButton.focus());
+    });
+}
+
 function closeModal() {
     document.getElementById('modalOverlay').style.display = 'none';
     document.getElementById('modalBody').className = 'modal-body';
@@ -1722,6 +2006,9 @@ function initApp() {
     document.getElementById('projectSearch').onkeydown = (e) => {
         if (e.key === 'Enter') loadProjects();
     };
+
+    // 搜索版本
+    document.getElementById('versionSearch').oninput = filterVersions;
 
     // 项目标签切换
     document.getElementById('pivotFav').onclick = () => switchProjectTab('favorite');

@@ -121,6 +121,24 @@ const ApiClient = {
         return this._asList(data);
     },
 
+    /** 删除模块/组件 */
+    async deleteModule(moduleId) {
+        const data = await this._request(
+            'DELETE',
+            `/api/v1/module/${encodeURIComponent(String(moduleId))}`,
+        );
+        return data || { ok: true };
+    },
+
+    /** 修改模块端口映射 */
+    async updateModulePort(modulePortId, payload) {
+        return this._request(
+            'PUT',
+            `/api/v1/moduleport/${encodeURIComponent(String(modulePortId))}`,
+            payload,
+        );
+    },
+
     /** 获取升级包记录 */
     _packageResource(family = 'upgrade') {
         return family === 'install' ? 'install' : 'update';

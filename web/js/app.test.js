@@ -11,6 +11,7 @@ const elements = {
     loginButton: { disabled: false, textContent: '登录' },
     loginRemember: { checked: false },
     projectSearch: { value: '' },
+    versionSearch: { value: '' },
     favoriteList: { innerHTML: '' },
     allProjectList: { innerHTML: '', classList: new Set() },
     favoriteList: { innerHTML: '', classList: new Set() },
@@ -22,6 +23,7 @@ const elements = {
     projectNextPage: { disabled: false },
     rightPanelLoading: { classList: new Set(['hidden']) },
     rightPanelLoadingText: { textContent: '' },
+    packageHint: { textContent: '' },
     offlineRadio: { checked: false },
     onlineRadio: { checked: true },
     seafileToggle: { checked: true, disabled: false },
@@ -94,11 +96,11 @@ assert.deepEqual(JSON.parse(JSON.stringify(onlineInstallPackageType)), {
     recordsPath: '/api/v1/recordsprojectinstall/',
 });
 assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('state.currentRecordType', context))), {
-    family: 'install',
+    family: 'upgrade',
     offline: true,
 });
 assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('getDefaultPackParameters()', context))), {
-    family: 'install',
+    family: 'upgrade',
     offline: true,
     support_cpu: 'x86_64',
     namespace: 'basic-app',
@@ -141,6 +143,11 @@ const onlineCard = vm.runInContext(`renderArtifactCard({
     namespace: '-', supportOs: '-', platform: '-', offline: '在线', seafile: 'false', fileMd5: '-',
 }, getPackageType('install', false))`, context);
 assert.doesNotMatch(onlineCard, /upload-seafile-btn/);
+assert.match(onlineCard, /artifact-cpu cpu-x86/);
+assert.equal(vm.runInContext("cpuArchitectureClass('aarch64')", context), 'cpu-aarch64');
+assert.equal(vm.runInContext("cpuArchitectureClass('arm64')", context), 'cpu-aarch64');
+assert.equal(vm.runInContext("cpuArchitectureClass('x86')", context), 'cpu-x86');
+assert.equal(vm.runInContext("cpuArchitectureClass('riscv64')", context), 'cpu-other');
 const downloadableCard = vm.runInContext(`renderArtifactCard({
     index: 1, status: { className: '', label: '成功' }, packageName: 'release.tar.gz',
     builder: 'tester', modules: [], supportCpu: 'x86_64', createdTime: '-', recordId: 2,
@@ -168,7 +175,9 @@ assert.doesNotMatch(indexHtml, /id="seafileToggleWrap" class="[^"]*toggle-on/);
 assert.doesNotMatch(indexHtml, /id="loginRemember"/);
 assert.match(indexHtml, /<link rel="icon" type="image\/svg\+xml" href="favicon\.svg">/);
 assert.match(indexHtml, /<script src="js\/utils\.js\?v=202607201910"><\/script>/);
-assert.match(indexHtml, /<script src="js\/app\.js\?v=202607201910"><\/script>/);
+assert.match(indexHtml, /<script src="js\/app\.js\?v=2026073118"><\/script>/);
+assert.match(indexHtml, /id="versionSearch"[^>]*placeholder="搜索版本\.\.\."/);
+assert.match(indexHtml, /id="confirmOverlay"/);
 assert.match(indexHtml, /id="userMenuTrigger"/);
 assert.match(indexHtml, /id="logoutButton"/);
 assert.doesNotMatch(indexHtml, /id="offlineRadio"/);
@@ -181,6 +190,7 @@ assert.doesNotMatch(indexHtml, /id="packageFamilySelect"/);
 assert.equal(fs.existsSync(__dirname + '/../favicon.svg'), true);
 const appCss = fs.readFileSync(__dirname + '/../css/app.css', 'utf8');
 const appJs = fs.readFileSync(__dirname + '/app.js', 'utf8');
+assert.doesNotMatch(appJs, /window\.confirm/);
 assert.equal((appJs.match(/id="recordsClose"/g) || []).length, 0);
 assert.equal((appJs.match(/id="recordsCloseTop"/g) || []).length, 1);
 assert.doesNotMatch(appCss, /\.branch-select:focus-within\s+\.branch-options/);
@@ -213,6 +223,30 @@ assert.deepEqual(Array.from(favoritePage, project => project.id), [21]);
 console.log('PASS: favorite projects use local pagination');
 
 (async () => {
+    context.capturedRecordType = null;
+    const realLoadPackageRecords = context.loadPackageRecords;
+    vm.runInContext(`
+        state.currentRecordType = getPackageType('install', false);
+        loadPackageRecords = async (_triggerButton, packageType) => {
+            capturedRecordType = packageType;
+        };
+    `, context);
+    await vm.runInContext("viewVersionRecords({ id: 975, update_version: 'V1.0.0' }, {})", context);
+    assert.deepEqual(JSON.parse(JSON.stringify(context.capturedRecordType)), {
+        family: 'upgrade',
+        offline: true,
+        label: '离线升级包',
+        recordsPath: '/api/v1/recordsprojectupdate/',
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('state.currentRecordType', context))), {
+        family: 'upgrade',
+        offline: true,
+        label: '离线升级包',
+        recordsPath: '/api/v1/recordsprojectupdate/',
+    });
+    context.loadPackageRecords = realLoadPackageRecords;
+    console.log('PASS: package records button defaults to offline upgrade records');
+
     context.sessionStorage.setItem('ifaas-packing.token', 'cached-token');
     context.sessionStorage.setItem('ifaas-packing.username', 'cached-user');
     await vm.runInContext('restoreSession()', context);
