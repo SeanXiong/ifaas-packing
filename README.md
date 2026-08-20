@@ -23,6 +23,41 @@ python server.py
 
 浏览器打开 `http://127.0.0.1:8080`，登录后即可使用。
 
+## Codex 查询与构建平台 CLI
+
+安装可选 MCP 依赖：
+
+```powershell
+python -m pip install -r requirements-mcp.txt
+```
+
+共享 CLI 从 `config/server.json` 读取系统 B 地址，并复用登录配置；也可使用
+`IFAAS_BACKEND_URL`、`IFAAS_TOKEN` 或 `IFAAS_USERNAME`/`IFAAS_PASSWORD` 覆盖。所有命令只输出裁剪后的业务字段。
+
+```powershell
+python ifaas_pack.py projects search --query 基础平台
+python ifaas_pack.py versions list --project-id 1001
+python ifaas_pack.py services list --version-id 2001
+python ifaas_pack.py target inspect --version-id 2001 --repository-url <git-url> --branch <branch>
+```
+
+`ifaas_mcp.py` 是只读 STDIO MCP Server，只提供项目、版本、服务、refs 匹配和发布计划校验；
+不提供切换分支或创建打包任务工具。Codex CLI 可用以下命令注册（替换 Python 路径）：
+
+```powershell
+codex mcp add ifaas-package -- python D:\workspace\ifaas-packing\ifaas_mcp.py
+```
+
+有副作用的分支切换与自动打包命令只供构建平台调用：
+
+```powershell
+python ifaas_pack.py services switch-branch --version-id 2001 --service-id 3001 --branch release-2.0
+python ifaas_pack.py package create --request-file release-request.json
+python ifaas_pack.py package get --task-id pkg_001
+```
+
+最后两个命令依赖系统 B 后端部署 `/api/v1/automation/package-tasks` 创建/查询接口。
+
 ## 配置文件
 
 所有配置以 JSON 文件保存在 `config/` 目录：
