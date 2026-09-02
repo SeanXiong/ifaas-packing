@@ -20,6 +20,7 @@ class McpServerTest(unittest.IsolatedAsyncioTestCase):
                 result = await session.list_tools()
         names = {tool.name for tool in result.tools}
         self.assertEqual(names, {
+            "list_login_profiles", "authenticate_login_profile",
             "search_projects", "list_project_versions", "list_version_services",
             "inspect_release_target", "validate_release_plan",
         })

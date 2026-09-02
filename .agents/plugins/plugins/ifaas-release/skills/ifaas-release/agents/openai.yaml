@@ -1,0 +1,6 @@
+interface:
+  display_name: "IFAAS 自动发布"
+  short_description: "显式登记当前仓库的自动构建与打包发布任务"
+  default_prompt: "使用 $ifaas-release 为当前仓库登记一次自动打包发布。"
+policy:
+  allow_implicit_invocation: false

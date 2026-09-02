@@ -18,6 +18,20 @@ class LongRunningProxyPathTests(unittest.TestCase):
         self.assertTrue(issubclass(SERVER.ThreadingHTTPServer, ThreadingMixIn))
         self.assertTrue(SERVER.ThreadingHTTPServer.daemon_threads)
 
+    def test_automation_settings_have_a_dedicated_persistence_file(self):
+        self.assertEqual(SERVER.AUTOMATION_SETTINGS_PATH.name, "automation-settings.json")
+
+    def test_automation_tasks_have_a_dedicated_persistence_file(self):
+        self.assertEqual(SERVER.PACKAGE_TASKS_PATH.name, "automation-package-tasks.json")
+
+    def test_automation_routes_do_not_reuse_credential_config(self):
+        self.assertNotEqual(SERVER.AUTOMATION_SETTINGS_PATH, SERVER.SERVER_CONFIG_PATH)
+
+    def test_automation_settings_cannot_bypass_typed_api(self):
+        handler = object.__new__(SERVER.Handler)
+        handler.path = "/api/config/automation-settings"
+        self.assertIsNone(handler._config_name())
+
 
 if __name__ == "__main__":
     unittest.main()

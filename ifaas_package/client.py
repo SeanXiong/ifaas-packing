@@ -1,28 +1,26 @@
 """系统 B HTTP API 的共享客户端。"""
 
-from __future__ import annotations
-
 import json
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
 from typing import Any, Callable
 
 from .config import SystemBConfig
 
 
-Transport = Callable[[str, str, dict[str, str], bytes | None, int], tuple[int, Any]]
+Transport = Callable
 
 
-@dataclass
 class SystemBError(RuntimeError):
     """系统 B 稳定客户端错误。"""
 
-    code: str
-    message: str
-    status: int = 0
+    def __init__(self, code, message, status=0):
+        RuntimeError.__init__(self, message)
+        self.code = code
+        self.message = message
+        self.status = status
 
     def __str__(self) -> str:
         return self.message
@@ -31,10 +29,16 @@ class SystemBError(RuntimeError):
 class SystemBClient:
     """封装查询、分支切换和自动打包接口。"""
 
-    def __init__(self, config: SystemBConfig, transport: Transport | None = None):
+    def __init__(self, config: SystemBConfig, transport: "Transport | None" = None):
         self.config = config
         self._transport = transport or _urllib_transport
         self._token = config.token
+
+    def authenticate(self) -> dict:
+        """主动登录并仅返回非敏感的认证结果。"""
+
+        self._login()
+        return {"authenticated": True, "username": self.config.username}
 
     def search_projects(self, query: str = "", page: int = 1, page_size: int = 20) -> dict:
         params = urllib.parse.urlencode({"page": page, "pageSize": page_size, "name": query})
@@ -47,16 +51,16 @@ class SystemBClient:
             "total": _integer(_value(data, "count"), len(projects)),
         }
 
-    def get_project(self, project_id: str | int) -> dict:
+    def get_project(self, project_id: "str | int") -> dict:
         data = self._request("GET", f"/api/v1/project/{_quote(project_id)}")
         return self._project(_unwrap(data))
 
-    def list_versions(self, project_id: str | int) -> dict:
+    def list_versions(self, project_id: "str | int") -> dict:
         params = urllib.parse.urlencode({"project_id": project_id})
         data = self._request("GET", f"/api/v1/version/?{params}")
         return {"versions": [self._version(item) for item in _as_list(data)]}
 
-    def list_services(self, version_id: str | int) -> dict:
+    def list_services(self, version_id: "str | int") -> dict:
         params = urllib.parse.urlencode({"version_id": version_id, "git_tag": "True"})
         data = self._request("GET", f"/api/v1/module/?{params}")
         return {"services": [self._service(item) for item in _as_list(data)]}
@@ -68,7 +72,9 @@ class SystemBClient:
             "tags": _string_list(_value(data, "tags")),
         }
 
-    def inspect_release_target(self, version_id: str | int, repository_url: str, branch: str) -> dict:
+    def inspect_release_target(
+        self, version_id: "str | int", repository_url: str, branch: str
+    ) -> dict:
         services = self.list_services(version_id)["services"]
         repository_key = normalize_git_url(repository_url)
         matches = [item for item in services if normalize_git_url(item.get("gitUrl", "")) == repository_key]
@@ -93,9 +99,9 @@ class SystemBClient:
 
     def validate_release_plan(
         self,
-        project_id: str | int,
-        version_id: str | int,
-        service_id: str | int,
+        project_id: "str | int",
+        version_id: "str | int",
+        service_id: "str | int",
         repository_url: str,
         branch: str,
     ) -> dict:
@@ -110,7 +116,9 @@ class SystemBClient:
         valid = bool(project.get("projectId") and version and service and service["branchExists"])
         return {"valid": valid, "project": project, "version": version, "service": service}
 
-    def switch_service_branch(self, version_id: str | int, service_id: str | int, branch: str) -> dict:
+    def switch_service_branch(
+        self, version_id: "str | int", service_id: "str | int", branch: str
+    ) -> dict:
         raw_services = self._raw_services(version_id)
         raw = next((item for item in raw_services if str(_id(item)) == str(service_id)), None)
         if raw is None:
@@ -146,38 +154,94 @@ class SystemBClient:
             raise SystemBError("BRANCH_UPDATE_NOT_APPLIED", "系统 B 服务分支修改后验证失败")
         return {"changed": True, "previousBranch": previous, "currentBranch": branch, "service": current}
 
+    def submit_package(
+        self, package_type: str, version_id: "str | int", payload: dict
+    ) -> dict:
+        """复用当前页面使用的安装包或升级包提交入口。"""
+
+        endpoint = "install" if package_type == "INSTALL" else "upgrade"
+        data = self._request("POST", f"/api/v1/packplus/{endpoint}/{_quote(version_id)}", payload)
+        return data if isinstance(data, dict) else {}
+
+    def list_package_records(
+        self, package_type: str, version_id: "str | int", offline: bool
+    ) -> "list[dict]":
+        """查询并白名单化当前页面使用的打包记录。"""
+
+        resource = "install" if package_type == "INSTALL" else "update"
+        params = urllib.parse.urlencode(
+            {"version_id": version_id, "offline_status": "True" if offline else "False"}
+        )
+        records = _as_list(self._request("GET", f"/api/v1/recordsproject{resource}/?{params}"))
+        return [self._package_record(record) for record in records]
+
+    def upload_to_seafile(self, storage_path: str) -> dict:
+        data = _unwrap(
+            self._request("POST", "/api/v1/package/2seafile", {"storagePath": storage_path})
+        )
+        task_id = _value(data, "taskID", "task_id")
+        if not _value(data, "success") or not task_id:
+            raise SystemBError(
+                "CLOUD_UPLOAD_CREATE_FAILED",
+                str(_value(data, "message") or "云盘上传任务创建失败"),
+            )
+        return {"taskId": str(task_id)}
+
+    def get_upload_progress(self, task_id: str) -> dict:
+        params = urllib.parse.urlencode({"task_id": task_id})
+        data = _unwrap(
+            self._request(
+                "GET", f"/api/v1/package/progress/{_quote(task_id)}?{params}"
+            )
+        )
+        progress = _value(data, "progress")
+        progress = progress if isinstance(progress, dict) else {}
+        return {
+            "state": str(_value(data, "state") or ""),
+            "complete": bool(_value(data, "complete")),
+            "success": _value(data, "success"),
+            "percent": _integer(_value(progress, "percent"), 0),
+            "description": str(_value(progress, "description") or ""),
+        }
+
     def create_package_task(self, payload: dict) -> dict:
-        data = _unwrap(self._request("POST", "/api/v1/automation/package-tasks", payload))
-        task_id = _value(data, "taskId", "task_id")
+        data = _unwrap(self._request("POST", "/api/automation/package-tasks", payload))
+        task_id = _value(data, "packageTaskId", "taskId", "task_id")
         if not task_id:
             raise SystemBError("PACKAGE_TASK_ID_MISSING", "自动打包响应缺少 taskId")
-        return {"taskId": str(task_id), "status": str(_value(data, "status") or "CREATED")}
+        return {"packageTaskId": str(task_id), "status": str(_value(data, "status") or "ACCEPTED")}
 
     def get_package_task(self, task_id: str) -> dict:
-        data = _unwrap(self._request("GET", f"/api/v1/automation/package-tasks/{_quote(task_id)}"))
+        data = _unwrap(self._request("GET", f"/api/automation/package-tasks/{_quote(task_id)}"))
         artifact = _value(data, "artifact")
         artifact = artifact if isinstance(artifact, dict) else {}
         error = _value(data, "error")
         error = error if isinstance(error, dict) else None
         return {
-            "taskId": str(_value(data, "taskId", "task_id") or task_id),
+            "packageTaskId": str(_value(data, "packageTaskId", "taskId", "task_id") or task_id),
             "status": str(_value(data, "status") or "UNKNOWN"),
             "stage": _value(data, "stage", "currentStage"),
             "progress": _safe_progress(_value(data, "progress")),
+            "target": _value(data, "target"),
+            "queue": _value(data, "queue"),
+            "branchAlignment": _value(data, "branchAlignment"),
             "artifact": {
                 "name": _value(artifact, "name", "packageName"),
                 "downloadUrl": _value(artifact, "downloadUrl", "download_path"),
+                "cloudPath": _value(artifact, "cloudPath"),
                 "cloudUrl": _value(artifact, "cloudUrl", "seafile_path"),
                 "md5": _value(artifact, "md5", "fileMD5"),
             },
             "error": _safe_error(error),
         }
 
-    def _raw_services(self, version_id: str | int) -> list[dict]:
+    def _raw_services(self, version_id: "str | int") -> "list[dict]":
         params = urllib.parse.urlencode({"version_id": version_id, "git_tag": "True"})
         return _as_list(self._request("GET", f"/api/v1/module/?{params}"))
 
-    def _request(self, method: str, path: str, payload: dict | None = None, retry_auth: bool = True) -> Any:
+    def _request(
+        self, method: str, path: str, payload: "dict | None" = None, retry_auth: bool = True
+    ) -> Any:
         if not self._token and path != "/rest-auth/login/":
             self._login()
         headers = {"Content-Type": "application/json"}
@@ -249,6 +313,29 @@ class SystemBClient:
             "serviceType": _integer(_value(raw, "service_type"), 1),
         }
 
+    @staticmethod
+    def _package_record(raw: dict) -> dict:
+        cloud_value = str(_value(raw, "seafile_path") or "")
+        download_url = str(_value(raw, "download_path") or "")
+        storage_path = str(_value(raw, "storage_path") or "")
+        name = str(_value(raw, "package_name", "name", "file_name", "filename") or "")
+        if not name:
+            candidate = storage_path or urllib.parse.urlparse(download_url).path
+            name = candidate.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        return {
+            "recordId": _id(raw),
+            "packStatus": _value(raw, "pack_status"),
+            "name": name or None,
+            "downloadUrl": download_url or None,
+            "storagePath": storage_path or None,
+            "md5": _value(raw, "fileMD5", "file_md5", "md5", "filemd5"),
+            "cloudPath": cloud_value or None,
+            "cloudUrl": cloud_value if cloud_value.lower().startswith(("http://", "https://")) else None,
+            "cloudTaskId": _value(raw, "task_id_2seafile"),
+            "createdAt": _value(raw, "created_time"),
+            "updatedAt": _value(raw, "updated_time"),
+        }
+
 
 def normalize_git_url(value: str) -> str:
     """把 HTTP/SSH Git URL 归一化为 host/path。"""
@@ -268,7 +355,13 @@ def normalize_git_url(value: str) -> str:
     return f"{host.lower()}/{path.lower()}"
 
 
-def _urllib_transport(method: str, url: str, headers: dict[str, str], body: bytes | None, timeout: int) -> tuple[int, Any]:
+def _urllib_transport(
+    method: str,
+    url: str,
+    headers: "dict[str, str]",
+    body: "bytes | None",
+    timeout: int,
+) -> "tuple[int, Any]":
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -288,7 +381,7 @@ def _decode_json(raw: bytes) -> Any:
         return {"message": "系统 B 返回了无法解析的响应"}
 
 
-def _as_list(data: Any) -> list[dict]:
+def _as_list(data: Any) -> "list[dict]":
     if isinstance(data, list):
         return [item for item in data if isinstance(item, dict)]
     if isinstance(data, dict):
@@ -336,7 +429,7 @@ def _quote(value: Any) -> str:
     return urllib.parse.quote(str(value), safe="")
 
 
-def _string_list(value: Any) -> list[str]:
+def _string_list(value: Any) -> "list[str]":
     return [str(item) for item in value] if isinstance(value, list) else []
 
 
@@ -348,13 +441,13 @@ def _error_message(data: Any, status: int) -> str:
     return str(_value(data, "message", "detail", "error") or f"系统 B 请求失败（HTTP {status}）")
 
 
-def _safe_progress(value: Any) -> dict | None:
+def _safe_progress(value: Any) -> "dict | None":
     if not isinstance(value, dict):
         return None
     return {key: value.get(key) for key in ("stage", "percent", "description", "speed") if key in value}
 
 
-def _safe_error(value: Any) -> dict | None:
+def _safe_error(value: Any) -> "dict | None":
     if not isinstance(value, dict):
         return None
     return {key: value.get(key) for key in ("stage", "code", "message", "retryable") if key in value}

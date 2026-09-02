@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ifaas.local/schemas/package-task.schema.json",
+  "title": "自动打包任务查询响应",
+  "$ref": "#/$defs/queryResponse",
+  "$defs": {
+    "identifier": {
+      "oneOf": [
+        {"type": "integer", "minimum": 1},
+        {"type": "string", "minLength": 1}
+      ]
+    },
+    "packageParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packageType", "networkType", "cpuArchitecture", "namespace", "uploadCloud"],
+      "properties": {
+        "packageType": {"enum": ["INSTALL", "UPGRADE"]},
+        "networkType": {"enum": ["OFFLINE", "ONLINE"]},
+        "cpuArchitecture": {"enum": ["x86_64", "aarch64"]},
+        "namespace": {"type": "string", "minLength": 1},
+        "uploadCloud": {"type": "boolean"}
+      }
+    },
+    "createRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clientRequestId", "repositoryUrl", "branch", "parameters"],
+      "properties": {
+        "clientRequestId": {"type": "string", "minLength": 1},
+        "repositoryUrl": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "parameters": {"$ref": "#/$defs/packageParameters"}
+      }
+    },
+    "acceptedResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packageTaskId", "status"],
+      "properties": {
+        "packageTaskId": {"type": "string", "minLength": 1},
+        "status": {"const": "ACCEPTED"}
+      }
+    },
+    "targetSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "projectName", "versionId", "versionName", "serviceId", "serviceName", "gitUrl"],
+      "properties": {
+        "projectId": {"$ref": "#/$defs/identifier"},
+        "projectName": {"type": "string", "minLength": 1},
+        "versionId": {"$ref": "#/$defs/identifier"},
+        "versionName": {"type": "string", "minLength": 1},
+        "serviceId": {"$ref": "#/$defs/identifier"},
+        "serviceName": {"type": "string", "minLength": 1},
+        "gitUrl": {"type": "string", "minLength": 1}
+      }
+    },
+    "queue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lockKey", "position"],
+      "properties": {
+        "lockKey": {"type": "string", "minLength": 3},
+        "position": {"type": "integer", "minimum": 0},
+        "waitingSince": {"type": ["string", "null"], "format": "date-time"}
+      }
+    },
+    "branchAlignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["previousBranch", "targetBranch", "changed", "verified"],
+      "properties": {
+        "previousBranch": {"type": ["string", "null"]},
+        "targetBranch": {"type": "string", "minLength": 1},
+        "changed": {"type": "boolean"},
+        "verified": {"type": "boolean"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": ["string", "null"]},
+        "downloadUrl": {"type": ["string", "null"]},
+        "md5": {"type": ["string", "null"]},
+        "cloudPath": {"type": ["string", "null"]},
+        "cloudUrl": {"type": ["string", "null"]},
+        "cloudRecoveryTriggered": {"type": "boolean"}
+      }
+    },
+    "queryResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "packageTaskId", "clientRequestId", "status", "stage", "progress", "parameters"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "packageTaskId": {"type": "string", "minLength": 1},
+        "clientRequestId": {"type": "string", "minLength": 1},
+        "status": {"enum": ["ACCEPTED", "RUNNING", "SUCCESS", "FAILED"]},
+        "stage": {"enum": ["ACCEPTED", "LOCATING_TARGET", "QUEUED", "ALIGNING_BRANCH", "PACKAGING_AND_UPLOADING", "VERIFYING_CLOUD_RESULT", "RECOVERING_CLOUD_UPLOAD", "SUCCESS", "FAILED"]},
+        "progress": {"type": "number", "minimum": 0, "maximum": 100},
+        "parameters": {"$ref": "#/$defs/packageParameters"},
+        "target": {"oneOf": [{"$ref": "#/$defs/targetSnapshot"}, {"type": "null"}]},
+        "queue": {"oneOf": [{"$ref": "#/$defs/queue"}, {"type": "null"}]},
+        "branchAlignment": {"oneOf": [{"$ref": "#/$defs/branchAlignment"}, {"type": "null"}]},
+        "artifact": {"oneOf": [{"$ref": "#/$defs/artifact"}, {"type": "null"}]},
+        "error": {"oneOf": [{"$ref": "stable-error.schema.json"}, {"type": "null"}]},
+        "createdAt": {"type": "string", "format": "date-time"},
+        "updatedAt": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}

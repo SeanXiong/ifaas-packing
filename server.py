@@ -15,17 +15,41 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from socketserver import ThreadingMixIn
+
+from ifaas_package.automation_settings import (
+    AutomationSettingsError,
+    AutomationSettingsService,
+    AutomationSettingsStore,
+)
+from ifaas_package.client import SystemBClient, SystemBError
+from ifaas_package.config import SystemBConfig
+from ifaas_package.package_tasks import (
+    PackageTaskError,
+    PackageTaskService,
+    PackageTaskStore,
+    PackageTaskWorker,
+)
 
 ROOT_DIR = Path(__file__).resolve().parent
 WEB_DIR = ROOT_DIR / "web"
 CONFIG_DIR = ROOT_DIR / "config"
 
 SERVER_CONFIG_PATH = CONFIG_DIR / "server.json"
+AUTOMATION_SETTINGS_PATH = CONFIG_DIR / "automation-settings.json"
+PACKAGE_TASKS_PATH = CONFIG_DIR / "automation-package-tasks.json"
+PACKAGE_TASK_STORE = PackageTaskStore(PACKAGE_TASKS_PATH)
+PACKAGE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=max(1, int(os.environ.get("IFAAS_AUTOMATION_WORKERS") or 4)),
+    thread_name_prefix="ifaas-package",
+)
 _SAFE_CONFIG_NAME = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+_RESERVED_CONFIG_NAMES = {"automation-settings", "server"}
 LONG_RUNNING_PROXY_PATHS = (
     "/api/v1/packplus/upgrade/",
     "/api/v1/packplus/install/",
@@ -57,7 +81,10 @@ class Handler(SimpleHTTPRequestHandler):
     def _send_cors(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Content-Type, Authorization, X-IFAAS-Username",
+        )
 
     def _send_json(self, data, status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
@@ -70,6 +97,20 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _send_json_error(self, status: int, message: str) -> None:
         self._send_json({"error": message}, status=status)
+
+    def _send_api_error(
+        self, error: "AutomationSettingsError | PackageTaskError | SystemBError"
+    ) -> None:
+        self._send_json(
+            {
+                "error": {
+                    "code": error.code,
+                    "message": error.message,
+                    "retryable": error.status >= 500,
+                }
+            },
+            status=error.status or 500,
+        )
 
     def _read_body(self) -> bytes:
         length = int(self.headers.get("Content-Length", 0))
@@ -92,7 +133,9 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path.startswith("/api/proxy/"):
+        if self.path.startswith("/api/automation/"):
+            self._handle_automation_get()
+        elif self.path.startswith("/api/proxy/"):
             self._handle_proxy("GET")
         elif self.path.startswith("/api/config/"):
             self._handle_config_read()
@@ -102,7 +145,9 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json_error(404, "Not Found")
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path.startswith("/api/proxy/"):
+        if urllib.parse.urlsplit(self.path).path == "/api/automation/package-tasks":
+            self._handle_automation_task_create()
+        elif self.path.startswith("/api/proxy/"):
             self._handle_proxy("POST")
         elif self.path.startswith("/api/config/"):
             self._handle_config_write()
@@ -110,7 +155,9 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json_error(404, "Not Found")
 
     def do_PUT(self) -> None:  # noqa: N802
-        if self.path.startswith("/api/proxy/"):
+        if urllib.parse.urlsplit(self.path).path == "/api/automation/settings":
+            self._handle_automation_settings_write()
+        elif self.path.startswith("/api/proxy/"):
             self._handle_proxy("PUT")
         else:
             self._send_json_error(404, "Not Found")
@@ -126,7 +173,7 @@ class Handler(SimpleHTTPRequestHandler):
     def _config_name(self):
         """从 URL path 提取配置名，做安全校验。"""
         name = self.path[len("/api/config/"):]
-        if not name or not _SAFE_CONFIG_NAME.match(name):
+        if not name or not _SAFE_CONFIG_NAME.fullmatch(name) or name in _RESERVED_CONFIG_NAMES:
             return None
         return name
 
@@ -163,6 +210,91 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json_error(500, f"写入配置失败：{exc}")
 
     # ---- API proxy --------------------------------------------------------
+
+    def _system_b_client(self) -> SystemBClient:
+        authorization = self.headers.get("Authorization", "")
+        prefix = "Token "
+        if not authorization.startswith(prefix) or not authorization[len(prefix):].strip():
+            raise AutomationSettingsError("UNAUTHORIZED", "当前登录状态无效。", 401)
+        backend = self.server_config.get("backend_url", "http://192.168.12.35:3000")
+        return SystemBClient(
+            SystemBConfig(base_url=backend, token=authorization[len(prefix):].strip())
+        )
+
+    def _automation_service(self) -> AutomationSettingsService:
+        client = self._system_b_client()
+        return AutomationSettingsService(
+            AutomationSettingsStore(AUTOMATION_SETTINGS_PATH),
+            client,
+        )
+
+    def _package_task_service(self) -> PackageTaskService:
+        client = self._system_b_client()
+        settings = AutomationSettingsService(
+            AutomationSettingsStore(AUTOMATION_SETTINGS_PATH), client
+        )
+        return _package_task_service(client, settings)
+
+    def _handle_automation_get(self) -> None:
+        parsed = urllib.parse.urlsplit(self.path)
+        query = urllib.parse.parse_qs(parsed.query)
+        try:
+            service = self._automation_service()
+            if parsed.path == "/api/automation/settings":
+                self._send_json(service.get())
+                return
+            task_match = re.fullmatch(r"/api/automation/package-tasks/([^/]+)", parsed.path)
+            if task_match:
+                task_id = urllib.parse.unquote(task_match.group(1))
+                self._send_json(self._package_task_service().get(task_id))
+                return
+            if parsed.path == "/api/automation/projects":
+                keyword = str(query.get("query", [""])[0])
+                page = max(1, int(query.get("page", ["1"])[0]))
+                page_size = min(100, max(1, int(query.get("pageSize", ["20"])[0])))
+                self._send_json(service.search_projects(keyword, page, page_size))
+                return
+            match = re.fullmatch(r"/api/automation/projects/([^/]+)/versions", parsed.path)
+            if match:
+                project_id = urllib.parse.unquote(match.group(1))
+                keyword = str(query.get("query", [""])[0])
+                self._send_json(service.search_versions(project_id, keyword))
+                return
+            self._send_json_error(404, "Not Found")
+        except (AutomationSettingsError, PackageTaskError, SystemBError) as error:
+            self._send_api_error(error)
+        except (TypeError, ValueError):
+            self._send_json(
+                {"error": {"code": "INVALID_QUERY", "message": "查询参数无效。", "retryable": False}},
+                status=400,
+            )
+
+    def _handle_automation_settings_write(self) -> None:
+        body = self._read_json_body()
+        if not isinstance(body, dict):
+            self._send_json(
+                {"error": {"code": "INVALID_REQUEST", "message": "请求体不是有效 JSON 对象。", "retryable": False}},
+                status=400,
+            )
+            return
+        try:
+            service = self._automation_service()
+            result = service.save(
+                body.get("projectId"),
+                body.get("versionId"),
+                self.headers.get("X-IFAAS-Username", ""),
+            )
+            self._send_json(result)
+        except (AutomationSettingsError, SystemBError) as error:
+            self._send_api_error(error)
+
+    def _handle_automation_task_create(self) -> None:
+        body = self._read_json_body()
+        try:
+            result, _created = self._package_task_service().create(body)
+            self._send_json(result, status=202)
+        except (AutomationSettingsError, PackageTaskError, SystemBError) as error:
+            self._send_api_error(error)
 
     def _handle_proxy(self, method: str) -> None:
         backend = self.server_config.get("backend_url", "http://192.168.12.35:3000")
@@ -214,6 +346,28 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 
+def _package_task_service(
+    client: SystemBClient,
+    settings: "AutomationSettingsService | None" = None,
+) -> PackageTaskService:
+    def submit(task_id: str) -> None:
+        PACKAGE_EXECUTOR.submit(_run_package_task, task_id, client)
+
+    return PackageTaskService(
+        PACKAGE_TASK_STORE,
+        settings
+        or AutomationSettingsService(AutomationSettingsStore(AUTOMATION_SETTINGS_PATH), client),
+        submit,
+    )
+
+
+def _run_package_task(task_id: str, client: SystemBClient) -> None:
+    service = _package_task_service(client)
+    attempts = max(1, int(os.environ.get("IFAAS_AUTOMATION_POLL_ATTEMPTS") or 60))
+    interval = max(0.0, float(os.environ.get("IFAAS_AUTOMATION_POLL_INTERVAL") or 2))
+    PackageTaskWorker(service, client, attempts, interval).run(task_id)
+
+
 def main() -> int:
     config = load_server_config()
     Handler.server_config = config
@@ -224,6 +378,16 @@ def main() -> int:
     # 确保 Web 和 Config 目录存在
     WEB_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    recovery_config = SystemBConfig.from_environment()
+    recovery_client = SystemBClient(recovery_config)
+    if recovery_config.token or (recovery_config.username and recovery_config.password):
+        recovered = _package_task_service(recovery_client).recover()
+        if recovered:
+            print(f"  已恢复自动打包任务：{len(recovered)} 个")
+    else:
+        pending = PACKAGE_TASK_STORE.non_terminal()
+        if pending:
+            print("  检测到未完成自动打包任务，但缺少 IFAAS_TOKEN 或登录配置，暂不恢复。")
     os.chdir(str(WEB_DIR))
 
     # MIME 类型补充
@@ -241,6 +405,8 @@ def main() -> int:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n服务器已停止。")
+    finally:
+        PACKAGE_EXECUTOR.shutdown(wait=False)
     return 0
 
 

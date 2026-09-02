@@ -56,6 +56,38 @@ const ApiClient = {
         return data;
     },
 
+    /** 调用本地自动打包服务，不把上游凭据写入请求体。 */
+    async _automationRequest(method, path, body = null) {
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-IFAAS-Username': this.username,
+        };
+        if (this.token) headers.Authorization = `Token ${this.token}`;
+        const options = { method, headers };
+        if (body !== null) options.body = JSON.stringify(body);
+        const response = await fetch(path, options);
+        const text = await response.text();
+        let data = null;
+        try {
+            data = text ? JSON.parse(text) : null;
+        } catch {
+            data = null;
+        }
+        if (this.isAuthenticationFailure(response.status, data)) {
+            const error = new Error(data?.error?.message || '登录状态已失效。');
+            error.isAuthenticationError = true;
+            if (typeof this.onAuthenticationFailure === 'function') this.onAuthenticationFailure(error);
+            throw error;
+        }
+        if (!response.ok) {
+            const error = new Error(data?.error?.message || `HTTP ${response.status}: 请求失败`);
+            error.code = data?.error?.code || 'AUTOMATION_REQUEST_FAILED';
+            error.retryable = Boolean(data?.error?.retryable);
+            throw error;
+        }
+        return data;
+    },
+
     isAuthenticationFailure(status, data) {
         if (status === 401 || status === 403) return true;
         if (!data || typeof data !== 'object') return false;
@@ -214,6 +246,25 @@ const ApiClient = {
         const params = new URLSearchParams({ task_id: taskId });
         const data = await this._request('GET', `/api/v1/package/progress/${taskId}?${params}`);
         return data;
+    },
+
+    async getAutomationSettings() {
+        return this._automationRequest('GET', '/api/automation/settings');
+    },
+
+    async saveAutomationSettings(projectId, versionId) {
+        return this._automationRequest('PUT', '/api/automation/settings', { projectId, versionId });
+    },
+
+    async searchAutomationProjects(query = '', page = 1, pageSize = 20) {
+        const params = new URLSearchParams({ query, page: String(page), pageSize: String(pageSize) });
+        return this._automationRequest('GET', `/api/automation/projects?${params}`);
+    },
+
+    async searchAutomationVersions(projectId, query = '') {
+        const params = new URLSearchParams({ query });
+        const encodedId = encodeURIComponent(String(projectId));
+        return this._automationRequest('GET', `/api/automation/projects/${encodedId}/versions?${params}`);
     },
 
     /** 解析 API 响应为列表 */

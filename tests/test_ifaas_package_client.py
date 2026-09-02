@@ -41,10 +41,26 @@ class FakeTransport:
             return 200, {"data": {"git_id": 944387}}
         if url.endswith("/api/v1/module/3001"):
             return 200, {"resultCode": 0}
-        if url.endswith("/api/v1/automation/package-tasks"):
-            return 202, {"taskId": "pkg-1", "status": "CREATED"}
-        if url.endswith("/api/v1/automation/package-tasks/pkg-1"):
-            return 200, {"taskId": "pkg-1", "status": "SUCCESS", "artifact": {"name": "a.tgz", "cloudUrl": "https://pan/a", "md5": "abc", "internal": "secret"}}
+        if url.endswith("/api/v1/packplus/upgrade/2451"):
+            return 200, {"message": "accepted"}
+        if "/api/v1/recordsprojectupdate/?" in url:
+            return 200, [{
+                "id": 9001,
+                "package_name": "update.tgz",
+                "download_path": "http://artifact/update.tgz",
+                "storage_path": "/tmp/update.tgz",
+                "fileMD5": "abc",
+                "seafile_path": "https://pan/update.tgz",
+                "task_id_2seafile": "cloud-1",
+            }]
+        if url.endswith("/api/v1/package/2seafile"):
+            return 200, {"success": True, "taskID": "cloud-1"}
+        if "/api/v1/package/progress/cloud-1?" in url:
+            return 200, {"state": "SUCCESS", "complete": True, "success": True, "progress": {"percent": 100}}
+        if url.endswith("/api/automation/package-tasks"):
+            return 202, {"packageTaskId": "pkg-1", "status": "ACCEPTED"}
+        if url.endswith("/api/automation/package-tasks/pkg-1"):
+            return 200, {"packageTaskId": "pkg-1", "status": "SUCCESS", "artifact": {"name": "a.tgz", "cloudUrl": "https://pan/a", "md5": "abc", "internal": "secret"}}
         return 404, {"message": "not found"}
 
 
@@ -79,7 +95,7 @@ class SystemBClientTest(unittest.TestCase):
 
     def test_automation_task_contract(self):
         created = self.client.create_package_task({"clientRequestId": "release-1"})
-        self.assertEqual(created["taskId"], "pkg-1")
+        self.assertEqual(created["packageTaskId"], "pkg-1")
         task = self.client.get_package_task("pkg-1")
         self.assertEqual(task["artifact"]["cloudUrl"], "https://pan/a")
         self.assertNotIn("internal", json.dumps(task))
@@ -95,6 +111,14 @@ class SystemBClientTest(unittest.TestCase):
             normalize_git_url("https://GITLAB/chengdu/ifaas-service.git"),
             normalize_git_url("git@gitlab:chengdu/ifaas-service.git"),
         )
+
+    def test_existing_package_and_cloud_endpoints_are_normalized(self):
+        self.client.submit_package("UPGRADE", 2451, {"seafile": True})
+        records = self.client.list_package_records("UPGRADE", 2451, True)
+        self.assertEqual(records[0]["name"], "update.tgz")
+        self.assertEqual(records[0]["cloudUrl"], "https://pan/update.tgz")
+        self.assertEqual(self.client.upload_to_seafile("/tmp/update.tgz")["taskId"], "cloud-1")
+        self.assertTrue(self.client.get_upload_progress("cloud-1")["complete"])
 
 
 if __name__ == "__main__":

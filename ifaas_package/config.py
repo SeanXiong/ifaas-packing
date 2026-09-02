@@ -1,25 +1,29 @@
 """系统 B 客户端配置。"""
 
-from __future__ import annotations
-
 import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
-@dataclass(frozen=True)
 class SystemBConfig:
     """系统 B 连接配置。"""
 
-    base_url: str
-    username: str = ""
-    password: str = ""
-    token: str = ""
-    timeout_seconds: int = 30
+    def __init__(
+        self,
+        base_url,
+        username="",
+        password="",
+        token="",
+        timeout_seconds=30,
+    ):
+        self.base_url = base_url
+        self.username = username
+        self.password = password
+        self.token = token
+        self.timeout_seconds = timeout_seconds
 
     @classmethod
     def from_environment(cls) -> "SystemBConfig":
@@ -51,7 +55,7 @@ def _read_json(path: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _read_login_profile(config_dir: Path) -> tuple[str, str]:
+def _read_login_profile(config_dir: Path) -> "tuple[str, str]":
     data = _read_json(config_dir / "login-profiles.json")
     accounts = data.get("accounts")
     if not isinstance(accounts, dict) or not accounts:

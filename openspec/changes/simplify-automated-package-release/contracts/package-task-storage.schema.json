@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ifaas.local/schemas/package-task-storage.schema.json",
+  "title": "自动打包任务持久化文件",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "tasks", "clientRequestIndex", "queues", "locks"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "tasks": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/task"}
+    },
+    "clientRequestIndex": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "queues": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1},
+        "uniqueItems": true
+      }
+    },
+    "locks": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    }
+  },
+  "$defs": {
+    "configurationSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "projectName", "versionId", "versionName"],
+      "properties": {
+        "projectId": {"$ref": "package-task.schema.json#/$defs/identifier"},
+        "projectName": {"type": "string"},
+        "versionId": {"$ref": "package-task.schema.json#/$defs/identifier"},
+        "versionName": {"type": "string"}
+      }
+    },
+    "requestSnapshot": {
+      "$ref": "package-task.schema.json#/$defs/createRequest"
+    },
+    "task": {
+      "type": "object",
+      "required": [
+        "schemaVersion", "packageTaskId", "clientRequestId", "requestSnapshot",
+        "configurationSnapshot", "status", "stage", "progress", "target",
+        "queue", "branchAlignment", "artifact", "error", "createdAt", "updatedAt"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "packageTaskId": {"type": "string", "minLength": 1},
+        "clientRequestId": {"type": "string", "minLength": 1},
+        "requestSnapshot": {"$ref": "#/$defs/requestSnapshot"},
+        "configurationSnapshot": {"$ref": "#/$defs/configurationSnapshot"},
+        "status": {"enum": ["ACCEPTED", "RUNNING", "SUCCESS", "FAILED"]},
+        "stage": {
+          "enum": [
+            "ACCEPTED", "LOCATING_TARGET", "QUEUED", "ALIGNING_BRANCH",
+            "PACKAGING_AND_UPLOADING", "VERIFYING_CLOUD_RESULT",
+            "RECOVERING_CLOUD_UPLOAD", "SUCCESS", "FAILED"
+          ]
+        },
+        "progress": {"type": "number", "minimum": 0, "maximum": 100},
+        "target": {
+          "oneOf": [
+            {"$ref": "package-task.schema.json#/$defs/targetSnapshot"},
+            {"type": "null"}
+          ]
+        },
+        "queue": {
+          "oneOf": [
+            {"$ref": "package-task.schema.json#/$defs/queue"},
+            {"type": "null"}
+          ]
+        },
+        "branchAlignment": {
+          "oneOf": [
+            {"$ref": "package-task.schema.json#/$defs/branchAlignment"},
+            {"type": "null"}
+          ]
+        },
+        "artifact": {
+          "oneOf": [
+            {"$ref": "package-task.schema.json#/$defs/artifact"},
+            {"type": "null"}
+          ]
+        },
+        "error": {
+          "oneOf": [
+            {"$ref": "stable-error.schema.json"},
+            {"type": "null"}
+          ]
+        },
+        "createdAt": {"type": "string", "format": "date-time"},
+        "updatedAt": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}

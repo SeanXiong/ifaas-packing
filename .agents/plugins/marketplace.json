@@ -1,0 +1,20 @@
+{
+  "name": "ifaas-tools",
+  "interface": {
+    "displayName": "IFAAS Tools"
+  },
+  "plugins": [
+    {
+      "name": "ifaas-release",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ifaas-release"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

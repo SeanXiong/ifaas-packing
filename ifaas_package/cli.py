@@ -1,7 +1,5 @@
 """系统 B 查询与构建平台动作 CLI。"""
 
-from __future__ import annotations
-
 import argparse
 import json
 import sys
@@ -13,22 +11,22 @@ from .config import SystemBConfig
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ifaas-pack")
-    groups = parser.add_subparsers(dest="group", required=True)
+    groups = parser.add_subparsers(dest="group")
 
     projects = groups.add_parser("projects")
-    project_commands = projects.add_subparsers(dest="command", required=True)
+    project_commands = projects.add_subparsers(dest="command")
     search = project_commands.add_parser("search")
     search.add_argument("--query", default="")
     search.add_argument("--page", type=int, default=1)
     search.add_argument("--page-size", type=int, default=20)
 
     versions = groups.add_parser("versions")
-    version_commands = versions.add_subparsers(dest="command", required=True)
+    version_commands = versions.add_subparsers(dest="command")
     version_list = version_commands.add_parser("list")
     version_list.add_argument("--project-id", required=True)
 
     services = groups.add_parser("services")
-    service_commands = services.add_subparsers(dest="command", required=True)
+    service_commands = services.add_subparsers(dest="command")
     service_list = service_commands.add_parser("list")
     service_list.add_argument("--version-id", required=True)
     switch = service_commands.add_parser("switch-branch")
@@ -37,19 +35,19 @@ def build_parser() -> argparse.ArgumentParser:
     switch.add_argument("--branch", required=True)
 
     refs = groups.add_parser("refs")
-    ref_commands = refs.add_subparsers(dest="command", required=True)
+    ref_commands = refs.add_subparsers(dest="command")
     ref_list = ref_commands.add_parser("list")
     ref_list.add_argument("--git-url", required=True)
 
     target = groups.add_parser("target")
-    target_commands = target.add_subparsers(dest="command", required=True)
+    target_commands = target.add_subparsers(dest="command")
     inspect = target_commands.add_parser("inspect")
     inspect.add_argument("--version-id", required=True)
     inspect.add_argument("--repository-url", required=True)
     inspect.add_argument("--branch", required=True)
 
     release = groups.add_parser("release")
-    release_commands = release.add_subparsers(dest="command", required=True)
+    release_commands = release.add_subparsers(dest="command")
     validate = release_commands.add_parser("validate")
     validate.add_argument("--project-id", required=True)
     validate.add_argument("--version-id", required=True)
@@ -58,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--branch", required=True)
 
     package = groups.add_parser("package")
-    package_commands = package.add_subparsers(dest="command", required=True)
+    package_commands = package.add_subparsers(dest="command")
     create = package_commands.add_parser("create")
     create.add_argument("--request-file", type=Path, required=True)
     get = package_commands.add_parser("get")
@@ -94,9 +92,11 @@ def execute(args: argparse.Namespace, client: SystemBClient) -> dict:
     raise SystemBError("UNSUPPORTED_COMMAND", "不支持的命令")
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: "list[str] | None" = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if not getattr(args, "group", None) or not getattr(args, "command", None):
+        parser.error("必须指定命令组和子命令")
     try:
         result = execute(args, SystemBClient(SystemBConfig.from_environment()))
         print(json.dumps({"ok": True, "data": result}, ensure_ascii=False))

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>项目打包客户端</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="css/app.css?v=2026073117">
+    <link rel="stylesheet" href="css/app.css?v=202609021600">
 </head>
 <body>
 
@@ -42,6 +42,18 @@
     <div class="app-header">
         <h1>项目打包工作台</h1>
         <span class="subtitle">三栏联动选择项目、版本与服务组件</span>
+        <div class="automation-header-actions">
+            <button type="button" id="automationStatus" class="automation-status status-unconfigured">
+                <span class="automation-status-dot" aria-hidden="true"></span>
+                <span id="automationStatusText">自动打包未配置</span>
+            </button>
+            <button type="button" id="automationSettingsButton" class="automation-settings-button">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 8.25A3.75 3.75 0 1 0 12 15.75 3.75 3.75 0 0 0 12 8.25Zm8.1 4.86v-2.22l-2.08-.74a6.64 6.64 0 0 0-.65-1.57l.95-1.99-1.57-1.57-1.99.95a6.64 6.64 0 0 0-1.57-.65L12.45 3h-2.22l-.74 2.08a6.64 6.64 0 0 0-1.57.65l-1.99-.95-1.57 1.57.95 1.99a6.64 6.64 0 0 0-.65 1.57l-2.08.74v2.22l2.08.74c.15.55.37 1.08.65 1.57l-.95 1.99 1.57 1.57 1.99-.95c.49.28 1.02.5 1.57.65l.74 2.08h2.22l.74-2.08a6.64 6.64 0 0 0 1.57-.65l1.99.95 1.57-1.57-.95-1.99c.28-.49.5-1.02.65-1.57l2.08-.74Z"/>
+                </svg>
+                <span>设置</span>
+            </button>
+        </div>
         <div class="user-menu" id="userMenu">
             <button type="button" class="user-menu-trigger" id="userMenuTrigger" aria-haspopup="true" aria-expanded="false">
                 <span class="user-avatar" aria-hidden="true">👤</span>
@@ -127,6 +139,47 @@
     </div>
 </div>
 
+<!-- 自动打包目标设置抽屉 -->
+<div id="automationDrawer" class="automation-drawer" aria-hidden="true">
+    <button type="button" id="automationDrawerMask" class="automation-drawer-mask" aria-label="关闭设置"></button>
+    <aside class="automation-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="automationDrawerTitle">
+        <div class="automation-drawer-head">
+            <div>
+                <p class="automation-drawer-kicker">AUTOMATED RELEASE</p>
+                <h2 id="automationDrawerTitle">自动打包设置</h2>
+                <p>固定一个项目和产品，发布任务将按 Git URL 自动定位服务。</p>
+            </div>
+            <button type="button" id="automationDrawerClose" class="automation-drawer-close" aria-label="关闭">×</button>
+        </div>
+        <div id="automationDrawerNotice" class="automation-drawer-notice hidden" role="status"></div>
+        <div class="automation-field">
+            <label for="automationProjectInput">项目</label>
+            <div class="automation-combobox">
+                <input type="text" id="automationProjectInput" class="form-input" placeholder="输入项目名称搜索" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="automationProjectOptions">
+                <div id="automationProjectOptions" class="automation-options" role="listbox"></div>
+            </div>
+            <p class="automation-field-help">必须从真实候选中选择，输入文本不会作为 ID 保存。</p>
+        </div>
+        <div class="automation-field">
+            <label for="automationVersionInput">产品</label>
+            <div class="automation-combobox">
+                <input type="text" id="automationVersionInput" class="form-input" placeholder="请先选择项目" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="automationVersionOptions" disabled>
+                <div id="automationVersionOptions" class="automation-options" role="listbox"></div>
+            </div>
+        </div>
+        <div id="automationAudit" class="automation-audit hidden">
+            <div><span>创建人</span><strong id="automationCreatedBy">-</strong></div>
+            <div><span>创建时间</span><strong id="automationCreatedAt">-</strong></div>
+            <div><span>最后修改人</span><strong id="automationUpdatedBy">-</strong></div>
+            <div><span>最后修改时间</span><strong id="automationUpdatedAt">-</strong></div>
+        </div>
+        <div class="automation-drawer-actions">
+            <button type="button" id="automationCancel" class="btn btn-secondary">取消</button>
+            <button type="button" id="automationSave" class="btn btn-primary">保存设置</button>
+        </div>
+    </aside>
+</div>
+
 <!-- ================================================================
      通用弹窗
      ================================================================ -->
@@ -159,8 +212,8 @@
      ================================================================ -->
     <script src="js/utils.js?v=202607201910"></script>
     <script src="js/config.js?v=202607201910"></script>
-    <script src="js/api.js?v=2026073111"></script>
-    <script src="js/app.js?v=2026073118"></script>
+    <script src="js/api.js?v=202609021600"></script>
+    <script src="js/app.js?v=202609021600"></script>
 
 </body>
 </html>

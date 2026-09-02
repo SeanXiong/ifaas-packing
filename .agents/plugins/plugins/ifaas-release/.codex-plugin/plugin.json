@@ -1,0 +1,21 @@
+{
+  "name": "ifaas-release",
+  "version": "1.0.0",
+  "description": "仅通过显式 $ifaas-release 调用登记 IFAAS 自动打包发布。",
+  "author": {
+    "name": "IFAAS Team"
+  },
+  "repository": "https://github.com/SeanXiong/ifaas-packing",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "IFAAS 自动发布",
+    "shortDescription": "显式登记当前仓库的自动构建与打包发布任务。",
+    "longDescription": "仅在用户显式调用 $ifaas-release 时读取本地 Git 上下文，通过 CLI/HTTP 登记发布任务，并在平台允许后推送。",
+    "developerName": "IFAAS Team",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "使用 $ifaas-release 为当前仓库登记一次自动打包发布。"
+    ]
+  }
+}

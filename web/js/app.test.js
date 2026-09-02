@@ -30,6 +30,18 @@ const elements = {
     cpuSelect: { value: 'x86_64' },
     namespaceInput: { value: 'basic-app' },
     apolloInput: { value: '' },
+    automationStatus: { classList: new Set(['automation-status', 'status-unconfigured']) },
+    automationStatusText: { textContent: '' },
+    automationProjectInput: { value: '', disabled: false, setAttribute() {} },
+    automationVersionInput: { value: '', placeholder: '', disabled: true, setAttribute() {} },
+    automationProjectOptions: { innerHTML: '', classList: new Set(), querySelectorAll() { return []; } },
+    automationVersionOptions: { innerHTML: '', classList: new Set(), querySelectorAll() { return []; } },
+    automationDrawerNotice: { textContent: '', classList: new Set(['hidden']) },
+    automationAudit: { classList: new Set(['hidden']) },
+    automationCreatedBy: { textContent: '' },
+    automationCreatedAt: { textContent: '' },
+    automationUpdatedBy: { textContent: '' },
+    automationUpdatedAt: { textContent: '' },
 };
 elements.seafileToggleWrap.classList.toggle = function (name, enabled) {
     if (enabled) this.add(name);
@@ -106,6 +118,28 @@ assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('getDefaultPackParame
     namespace: 'basic-app',
     seafile: false,
 });
+assert.equal(vm.runInContext("automationCandidateId({ projectId: 586 }, 'project')", context), 586);
+assert.equal(vm.runInContext("automationCandidateId({ versionId: 2416 }, 'version')", context), 2416);
+assert.equal(vm.runInContext("automationCandidateId({ name: '自由文本' }, 'project')", context), null);
+vm.runInContext(`applyAutomationSettingsToForm({
+    status: 'VALID',
+    target: { projectId: 586, projectName: '深海外部支撑', versionId: 2416, versionName: '深海产品' },
+    audit: { createdBy: 'alice', createdAt: '2026-09-01T00:00:00Z', updatedBy: 'bob', updatedAt: '2026-09-02T00:00:00Z' },
+})`, context);
+assert.equal(elements.automationProjectInput.value, '深海外部支撑');
+assert.equal(elements.automationVersionInput.value, '深海产品');
+assert.equal(elements.automationVersionInput.disabled, false);
+assert.equal(elements.automationCreatedBy.textContent, 'alice');
+vm.runInContext("updateAutomationStatus({ status: 'INVALID' })", context);
+assert.equal(elements.automationStatusText.textContent, '自动打包配置失效');
+assert.equal(elements.automationStatus.classList.has('status-invalid'), true);
+vm.runInContext('searchAutomationVersions = async () => {}', context);
+vm.runInContext("selectAutomationCandidate('project', { projectId: 777, name: '新项目' })", context);
+assert.equal(vm.runInContext('state.automationVersion', context), null);
+assert.equal(elements.automationVersionInput.value, '');
+vm.runInContext('state.automationProject = null; state.automationVersion = null', context);
+vm.runInContext('saveAutomationSettings()', context);
+assert.match(elements.automationDrawerNotice.textContent, /真实项目和产品/);
 assert.equal(vm.runInContext("getLoginProfileName('?profile=alice')", context), 'alice');
 assert.equal(vm.runInContext("getLoginProfileName('?profile=not%20valid')", context), '');
 assert.equal(vm.runInContext("isSeafileUploadAllowed(getPackageType('upgrade', false))", context), false);
@@ -175,11 +209,17 @@ assert.doesNotMatch(indexHtml, /id="seafileToggleWrap" class="[^"]*toggle-on/);
 assert.doesNotMatch(indexHtml, /id="loginRemember"/);
 assert.match(indexHtml, /<link rel="icon" type="image\/svg\+xml" href="favicon\.svg">/);
 assert.match(indexHtml, /<script src="js\/utils\.js\?v=202607201910"><\/script>/);
-assert.match(indexHtml, /<script src="js\/app\.js\?v=2026073118"><\/script>/);
+assert.match(indexHtml, /<script src="js\/app\.js\?v=202609021600"><\/script>/);
 assert.match(indexHtml, /id="versionSearch"[^>]*placeholder="搜索版本\.\.\."/);
 assert.match(indexHtml, /id="confirmOverlay"/);
 assert.match(indexHtml, /id="userMenuTrigger"/);
 assert.match(indexHtml, /id="logoutButton"/);
+assert.match(indexHtml, /id="automationStatus"/);
+assert.match(indexHtml, /id="automationSettingsButton"/);
+assert.match(indexHtml, /id="automationDrawer"/);
+assert.match(indexHtml, /id="automationProjectInput"[^>]*role="combobox"/);
+assert.match(indexHtml, /id="automationVersionInput"[^>]*disabled/);
+assert.match(indexHtml, /id="automationAudit"/);
 assert.doesNotMatch(indexHtml, /id="offlineRadio"/);
 assert.doesNotMatch(indexHtml, /id="onlineRadio"/);
 assert.doesNotMatch(indexHtml, /id="cpuSelect"/);
@@ -201,10 +241,14 @@ assert.match(appCss, /\.pack-confirm-item code\s*\{[\s\S]*?text-align:\s*left/);
 assert.match(appCss, /\.pack-parameter-form\s*\{[\s\S]*?grid-template-columns:\s*88px 240px/);
 assert.match(appCss, /\.pack-parameter-form \.label\s*\{[\s\S]*?text-align:\s*right/);
 assert.match(appCss, /\.pack-parameter-form \.form-input,[\s\S]*?\.pack-parameter-form \.form-select\s*\{[\s\S]*?width:\s*240px/);
-assert.match(appJs, /id="packageNetworkSelect"/);
-assert.match(appJs, /id="packageCpuSelect"/);
+assert.match(appJs, /name="packageNetwork"/);
+assert.match(appJs, /name="packageCpu"/);
 assert.match(appJs, /id="packageNamespaceInput"/);
 assert.match(appJs, /need_apollo:\s*true/);
+assert.match(appJs, /state\.automationVersion\s*=\s*null/);
+assert.match(appJs, /ApiClient\.saveAutomationSettings\(projectId, versionId\)/);
+assert.match(appCss, /\.automation-drawer-panel\s*\{[\s\S]*?width:\s*min\(460px, 100vw\)/);
+assert.match(appCss, /@media \(max-width:\s*760px\)[\s\S]*?\.automation-drawer-panel\s*\{\s*width:\s*100vw/);
 
 console.log('PASS: package parameter controls are scoped to the modal');
 

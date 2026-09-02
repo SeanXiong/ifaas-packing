@@ -116,6 +116,27 @@ async function testUpdateModulePortUsesDocumentedPayload() {
     assert.deepEqual(JSON.parse(requests[0].options.body), payload);
 }
 
+async function testAutomationSettingsUseLocalTypedApi() {
+    const requests = [];
+    context.fetch = async (url, options) => {
+        requests.push({ url, options });
+        return {
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ status: 'VALID' }),
+        };
+    };
+    vm.runInContext("ApiClient.token = 'session-token'; ApiClient.username = 'alice'", context);
+    await vm.runInContext("ApiClient.searchAutomationProjects('深海', 2, 20)", context);
+    await vm.runInContext("ApiClient.searchAutomationVersions(586, 'rel')", context);
+    await vm.runInContext('ApiClient.saveAutomationSettings(586, 2416)', context);
+    assert.equal(requests[0].url, '/api/automation/projects?query=%E6%B7%B1%E6%B5%B7&page=2&pageSize=20');
+    assert.equal(requests[1].url, '/api/automation/projects/586/versions?query=rel');
+    assert.deepEqual(JSON.parse(requests[2].options.body), { projectId: 586, versionId: 2416 });
+    assert.equal(requests[2].options.headers.Authorization, 'Token session-token');
+    assert.equal(requests[2].options.headers['X-IFAAS-Username'], 'alice');
+}
+
 (async () => {
     await testGetProjectsPageRequestsOnlyOnePage();
     await testInvalidTokenResponseIsAuthenticationError();
@@ -123,6 +144,7 @@ async function testUpdateModulePortUsesDocumentedPayload() {
     await testLogoutUsesDocumentedEndpoint();
     await testDeleteModuleUsesModuleEndpoint();
     await testUpdateModulePortUsesDocumentedPayload();
+    await testAutomationSettingsUseLocalTypedApi();
     console.log('PASS: project page requests and invalid Token handling');
 })().catch((error) => {
     console.error(error);

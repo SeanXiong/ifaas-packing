@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ifaas.local/schemas/automation-settings.schema.json",
+  "title": "自动打包目标设置响应",
+  "$ref": "#/$defs/settingsResponse",
+  "$defs": {
+    "identifier": {
+      "oneOf": [
+        {"type": "integer", "minimum": 1},
+        {"type": "string", "minLength": 1}
+      ]
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createdBy", "createdAt", "updatedBy", "updatedAt"],
+      "properties": {
+        "createdBy": {"type": "string", "minLength": 1},
+        "createdAt": {"type": "string", "format": "date-time"},
+        "updatedBy": {"type": "string", "minLength": 1},
+        "updatedAt": {"type": "string", "format": "date-time"}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "projectName", "versionId", "versionName"],
+      "properties": {
+        "projectId": {"$ref": "#/$defs/identifier"},
+        "projectName": {"type": "string", "minLength": 1},
+        "versionId": {"$ref": "#/$defs/identifier"},
+        "versionName": {"type": "string", "minLength": 1}
+      }
+    },
+    "saveRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "versionId"],
+      "properties": {
+        "projectId": {"$ref": "#/$defs/identifier"},
+        "versionId": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "settingsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "target", "audit"],
+      "properties": {
+        "status": {"enum": ["UNCONFIGURED", "VALID", "INVALID"]},
+        "target": {"oneOf": [{"$ref": "#/$defs/target"}, {"type": "null"}]},
+        "audit": {"oneOf": [{"$ref": "#/$defs/audit"}, {"type": "null"}]},
+        "invalidReason": {"type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "UNCONFIGURED"}}},
+          "then": {"properties": {"target": {"type": "null"}, "audit": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"status": {"enum": ["VALID", "INVALID"]}}},
+          "then": {"properties": {"target": {"$ref": "#/$defs/target"}, "audit": {"$ref": "#/$defs/audit"}}}
+        }
+      ]
+    }
+  }
+}

@@ -22,6 +22,10 @@ const state = {
     uploadTasks: {},          // taskId -> PackageRecord 映射
     uploadTimer: null,        // 上传进度轮询定时器
     currentRecordType: { family: 'upgrade', offline: true },
+    automationSettings: null,
+    automationProject: null,
+    automationVersion: null,
+    automationProjectPage: { page: 1, pageSize: 20, total: 0, query: '' },
 };
 
 const SESSION_TOKEN_KEY = 'ifaas-packing.token';
@@ -104,6 +108,246 @@ async function prefillLoginProfile() {
     document.getElementById('loginPassword').value = profile.password;
     return true;
 }
+
+/* ================================================================
+ * 自动打包目标设置
+ * ================================================================ */
+
+function automationCandidateId(candidate, kind) {
+    if (!candidate) return null;
+    return kind === 'project'
+        ? (candidate.projectId ?? candidate.id ?? candidate.pk ?? null)
+        : (candidate.versionId ?? candidate.id ?? candidate.pk ?? null);
+}
+
+function formatAutomationTime(value) {
+    if (!value) return '-';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function updateAutomationStatus(settings) {
+    const button = document.getElementById('automationStatus');
+    const text = document.getElementById('automationStatusText');
+    if (!button || !text) return;
+    const status = settings?.status || 'UNCONFIGURED';
+    button.classList.remove('status-valid', 'status-invalid', 'status-unconfigured');
+    if (status === 'VALID') {
+        button.classList.add('status-valid');
+        text.textContent = `自动打包：${settings.target?.versionName || '已配置'}`;
+    } else if (status === 'INVALID') {
+        button.classList.add('status-invalid');
+        text.textContent = '自动打包配置失效';
+    } else {
+        button.classList.add('status-unconfigured');
+        text.textContent = '自动打包未配置';
+    }
+}
+
+function renderAutomationAudit(audit) {
+    const container = document.getElementById('automationAudit');
+    if (!container) return;
+    container.classList.toggle('hidden', !audit);
+    if (!audit) return;
+    document.getElementById('automationCreatedBy').textContent = audit.createdBy || '-';
+    document.getElementById('automationCreatedAt').textContent = formatAutomationTime(audit.createdAt);
+    document.getElementById('automationUpdatedBy').textContent = audit.updatedBy || '-';
+    document.getElementById('automationUpdatedAt').textContent = formatAutomationTime(audit.updatedAt);
+}
+
+function showAutomationNotice(message = '') {
+    const notice = document.getElementById('automationDrawerNotice');
+    if (!notice) return;
+    notice.textContent = message;
+    notice.classList.toggle('hidden', !message);
+}
+
+async function loadAutomationSettings() {
+    if (typeof ApiClient.getAutomationSettings !== 'function' || !ApiClient.token) return null;
+    try {
+        const settings = await ApiClient.getAutomationSettings();
+        state.automationSettings = settings;
+        updateAutomationStatus(settings);
+        return settings;
+    } catch (error) {
+        if (!ApiClient.isAuthenticationError(error)) {
+            updateAutomationStatus({ status: 'INVALID' });
+        }
+        return null;
+    }
+}
+
+function setAutomationDrawerOpen(open) {
+    const drawer = document.getElementById('automationDrawer');
+    if (!drawer) return;
+    drawer.classList.toggle('open', open);
+    drawer.setAttribute('aria-hidden', String(!open));
+    document.body.classList.toggle('automation-drawer-open', open);
+    if (open) requestAnimationFrame(() => document.getElementById('automationProjectInput').focus());
+}
+
+function applyAutomationSettingsToForm(settings) {
+    const target = settings?.target || null;
+    state.automationProject = target ? { projectId: target.projectId, name: target.projectName } : null;
+    state.automationVersion = target ? { versionId: target.versionId, name: target.versionName } : null;
+    const projectInput = document.getElementById('automationProjectInput');
+    const versionInput = document.getElementById('automationVersionInput');
+    projectInput.value = target?.projectName || '';
+    versionInput.value = target?.versionName || '';
+    versionInput.disabled = !state.automationProject;
+    versionInput.placeholder = state.automationProject ? '输入产品名称搜索' : '请先选择项目';
+    renderAutomationAudit(settings?.audit || null);
+    showAutomationNotice(
+        settings?.status === 'INVALID'
+            ? '已保存的项目或产品已失效，请重新选择后保存。'
+            : settings?.status === 'UNCONFIGURED'
+                ? '自动发布任务暂不可用，请先完成项目和产品配置。'
+                : '',
+    );
+}
+
+async function openAutomationSettings() {
+    setUserMenuOpen(false);
+    setAutomationDrawerOpen(true);
+    showAutomationNotice('正在校验当前配置…');
+    const settings = await loadAutomationSettings();
+    applyAutomationSettingsToForm(settings || { status: 'UNCONFIGURED' });
+    await searchAutomationProjects(1);
+}
+
+function closeAutomationSettings() {
+    document.getElementById('automationProjectOptions')?.classList.remove('open');
+    document.getElementById('automationVersionOptions')?.classList.remove('open');
+    setAutomationDrawerOpen(false);
+}
+
+function renderAutomationOptions(kind, items, options = {}) {
+    const container = document.getElementById(
+        kind === 'project' ? 'automationProjectOptions' : 'automationVersionOptions',
+    );
+    const input = document.getElementById(
+        kind === 'project' ? 'automationProjectInput' : 'automationVersionInput',
+    );
+    if (!container || !input) return;
+    const escapedKind = kind === 'project' ? '项目' : '产品';
+    if (options.loading) {
+        container.innerHTML = `<div class="automation-options-message">正在加载${escapedKind}候选…</div>`;
+    } else if (options.error) {
+        container.innerHTML = `<div class="automation-options-message">加载失败<button type="button" class="automation-options-retry">重试</button></div>`;
+        container.querySelector('.automation-options-retry').onclick = () => {
+            if (kind === 'project') searchAutomationProjects(state.automationProjectPage.page);
+            else searchAutomationVersions();
+        };
+    } else if (!items.length) {
+        container.innerHTML = `<div class="automation-options-message">没有匹配的${escapedKind}</div>`;
+    } else {
+        container.innerHTML = items.map((item, index) => {
+            const id = automationCandidateId(item, kind);
+            return `<button type="button" class="automation-option" role="option" data-index="${index}"><strong>${escapeHtml(item.name || '')}</strong><code>${escapeHtml(id)}</code></button>`;
+        }).join('');
+        container.querySelectorAll('.automation-option').forEach(button => {
+            button.onclick = () => selectAutomationCandidate(kind, items[Number(button.dataset.index)]);
+        });
+        if (kind === 'project' && options.total > options.pageSize) {
+            const pageCount = Math.max(1, Math.ceil(options.total / options.pageSize));
+            container.insertAdjacentHTML('beforeend', `
+                <div class="automation-options-pagination">
+                    <button type="button" data-page="prev" ${options.page <= 1 ? 'disabled' : ''}>上一页</button>
+                    <span>${options.page} / ${pageCount}</span>
+                    <button type="button" data-page="next" ${options.page >= pageCount ? 'disabled' : ''}>下一页</button>
+                </div>
+            `);
+            container.querySelector('[data-page="prev"]').onclick = () => searchAutomationProjects(options.page - 1);
+            container.querySelector('[data-page="next"]').onclick = () => searchAutomationProjects(options.page + 1);
+        }
+    }
+    container.classList.add('open');
+    input.setAttribute('aria-expanded', 'true');
+}
+
+async function searchAutomationProjects(page = 1) {
+    const input = document.getElementById('automationProjectInput');
+    const query = input.value.trim();
+    state.automationProjectPage = { ...state.automationProjectPage, page, query };
+    renderAutomationOptions('project', [], { loading: true });
+    try {
+        const result = await ApiClient.searchAutomationProjects(query, page, state.automationProjectPage.pageSize);
+        state.automationProjectPage = {
+            page: Number(result.page) || page,
+            pageSize: Number(result.pageSize) || 20,
+            total: Number(result.total) || 0,
+            query,
+        };
+        renderAutomationOptions('project', result.projects || [], state.automationProjectPage);
+    } catch (error) {
+        renderAutomationOptions('project', [], { error: true });
+    }
+}
+
+async function searchAutomationVersions() {
+    if (!state.automationProject) return;
+    const input = document.getElementById('automationVersionInput');
+    renderAutomationOptions('version', [], { loading: true });
+    try {
+        const result = await ApiClient.searchAutomationVersions(
+            automationCandidateId(state.automationProject, 'project'),
+            input.value.trim(),
+        );
+        renderAutomationOptions('version', result.versions || []);
+    } catch (error) {
+        renderAutomationOptions('version', [], { error: true });
+    }
+}
+
+function selectAutomationCandidate(kind, candidate) {
+    if (kind === 'project') {
+        const previousId = automationCandidateId(state.automationProject, 'project');
+        const nextId = automationCandidateId(candidate, 'project');
+        state.automationProject = candidate;
+        document.getElementById('automationProjectInput').value = candidate.name || '';
+        document.getElementById('automationProjectOptions').classList.remove('open');
+        if (String(previousId ?? '') !== String(nextId ?? '')) state.automationVersion = null;
+        const versionInput = document.getElementById('automationVersionInput');
+        versionInput.disabled = false;
+        versionInput.placeholder = '输入产品名称搜索';
+        versionInput.value = state.automationVersion?.name || '';
+        document.getElementById('automationVersionOptions').innerHTML = '';
+        searchAutomationVersions();
+    } else {
+        state.automationVersion = candidate;
+        document.getElementById('automationVersionInput').value = candidate.name || '';
+        document.getElementById('automationVersionOptions').classList.remove('open');
+    }
+}
+
+async function saveAutomationSettings() {
+    const projectId = automationCandidateId(state.automationProject, 'project');
+    const versionId = automationCandidateId(state.automationVersion, 'version');
+    if (!projectId || !versionId) {
+        showAutomationNotice('请从候选列表中选择真实项目和产品后再保存。');
+        return;
+    }
+    const button = document.getElementById('automationSave');
+    button.disabled = true;
+    button.textContent = '保存中…';
+    try {
+        const settings = await ApiClient.saveAutomationSettings(projectId, versionId);
+        state.automationSettings = settings;
+        updateAutomationStatus(settings);
+        renderAutomationAudit(settings.audit);
+        showAutomationNotice('');
+        showSuccess('设置已保存', `后续自动任务将使用 ${settings.target.projectName} / ${settings.target.versionName}。`);
+        closeAutomationSettings();
+    } catch (error) {
+        showAutomationNotice(error.message || '保存失败，请重试。');
+    } finally {
+        button.disabled = false;
+        button.textContent = '保存设置';
+    }
+}
+
+const debouncedAutomationProjectSearch = debounce(() => searchAutomationProjects(1), 280);
+const debouncedAutomationVersionSearch = debounce(searchAutomationVersions, 280);
 
 /* ================================================================
  * 登录页
@@ -202,6 +446,7 @@ async function restoreSession() {
     updateUserMenu();
     hideLoginPage();
     await loadFavoriteProjects();
+    await loadAutomationSettings();
     return true;
 }
 
@@ -239,6 +484,7 @@ async function doLogin() {
         });
         hideLoginPage();
         await loadFavoriteProjects();
+        await loadAutomationSettings();
         showInfo('登录成功', '正在加载项目...');
     } catch (err) {
         showRequestError('登录失败', err);
@@ -1997,8 +2243,34 @@ function initApp() {
         showUserProfile();
     };
     document.getElementById('logoutButton').onclick = logout;
+    document.getElementById('automationStatus').onclick = openAutomationSettings;
+    document.getElementById('automationSettingsButton').onclick = openAutomationSettings;
+    document.getElementById('automationDrawerMask').onclick = closeAutomationSettings;
+    document.getElementById('automationDrawerClose').onclick = closeAutomationSettings;
+    document.getElementById('automationCancel').onclick = closeAutomationSettings;
+    document.getElementById('automationSave').onclick = saveAutomationSettings;
+    document.getElementById('automationProjectInput').onfocus = () => searchAutomationProjects(1);
+    document.getElementById('automationProjectInput').oninput = () => {
+        state.automationProject = null;
+        state.automationVersion = null;
+        const versionInput = document.getElementById('automationVersionInput');
+        versionInput.value = '';
+        versionInput.disabled = true;
+        versionInput.placeholder = '请先选择项目';
+        debouncedAutomationProjectSearch();
+    };
+    document.getElementById('automationVersionInput').onfocus = searchAutomationVersions;
+    document.getElementById('automationVersionInput').oninput = () => {
+        state.automationVersion = null;
+        debouncedAutomationVersionSearch();
+    };
     document.addEventListener('click', event => {
         if (!document.getElementById('userMenu').contains(event.target)) setUserMenuOpen(false);
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && document.getElementById('automationDrawer').classList.contains('open')) {
+            closeAutomationSettings();
+        }
     });
 
     // 搜索项目

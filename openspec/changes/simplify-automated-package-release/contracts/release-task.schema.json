@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ifaas.local/schemas/release-task.schema.json",
+  "title": "构建平台发布任务查询响应",
+  "$ref": "#/$defs/queryResponse",
+  "$defs": {
+    "packageParameters": {"$ref": "package-task.schema.json#/$defs/packageParameters"},
+    "createRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clientRequestId", "gitlabProjectId", "repositoryUrl", "branch", "commitSha", "parameters"],
+      "properties": {
+        "clientRequestId": {"type": "string", "minLength": 1},
+        "gitlabProjectId": {
+          "oneOf": [
+            {"type": "integer", "minimum": 1},
+            {"type": "string", "minLength": 1}
+          ]
+        },
+        "repositoryUrl": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "commitSha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+        "parameters": {"$ref": "#/$defs/packageParameters"}
+      }
+    },
+    "readyToPushResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["releaseTaskId", "status"],
+      "properties": {
+        "releaseTaskId": {"type": "string", "minLength": 1},
+        "status": {"const": "READY_TO_PUSH"}
+      }
+    },
+    "pushFailureRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"const": "PUSH_FAILED"},
+        "message": {"type": "string", "minLength": 1}
+      }
+    },
+    "queryResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "releaseTaskId", "clientRequestId", "status", "repositoryUrl", "branch", "commitSha", "parameters", "notificationStatus"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "releaseTaskId": {"type": "string", "minLength": 1},
+        "clientRequestId": {"type": "string", "minLength": 1},
+        "status": {"enum": ["READY_TO_PUSH", "PUSH_FAILED", "WAITING_BUILD", "BUILD_RUNNING", "BUILD_FAILED", "BUILD_TIMEOUT", "CREATING_PACKAGE", "PACKAGE_RUNNING", "SUCCESS", "FAILED"]},
+        "repositoryUrl": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "commitSha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+        "parameters": {"$ref": "#/$defs/packageParameters"},
+        "pipelineId": {"type": ["integer", "string", "null"]},
+        "pipelineUrl": {"type": ["string", "null"]},
+        "packageTaskId": {"type": ["string", "null"]},
+        "packageSnapshot": {"type": ["object", "null"], "additionalProperties": true},
+        "notificationStatus": {"enum": ["PENDING", "SENT", "FAILED", "NOT_REQUIRED"]},
+        "error": {"oneOf": [{"$ref": "stable-error.schema.json"}, {"type": "null"}]},
+        "createdAt": {"type": "string", "format": "date-time"},
+        "updatedAt": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}
