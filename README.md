@@ -44,6 +44,27 @@ POST /api/automation/package-tasks
 GET  /api/automation/package-tasks/{packageTaskId}
 ```
 
+`POST /api/automation/package-tasks` 支持多服务融合打包，所有目标服务必须存在于当前自动化设置固化的同一个 `versionId` 中。请求只会向底层安装包或升级包接口提交一次：
+
+```json
+{
+  "clientRequestId": "release-20260903-001",
+  "targets": [
+    {"repositoryUrl": "https://gitlab/team/service-a.git", "branch": "release/1.0"},
+    {"repositoryUrl": "https://gitlab/team/service-b.git", "branch": "release/1.0"}
+  ],
+  "parameters": {
+    "packageType": "UPGRADE",
+    "networkType": "OFFLINE",
+    "cpuArchitecture": "x86_64",
+    "namespace": "ifaas",
+    "uploadCloud": true
+  }
+}
+```
+
+单服务任务也必须使用只包含一个元素的 `targets` 数组；顶层 `repositoryUrl`、`branch` 不再接受。
+
 自动任务沿用页面登录 Token，也可以在服务重启恢复任务时通过 `IFAAS_TOKEN` 或
 `IFAAS_USERNAME`/`IFAAS_PASSWORD` 提供后端凭据。执行器可用
 `IFAAS_AUTOMATION_WORKERS`、`IFAAS_AUTOMATION_POLL_ATTEMPTS` 和

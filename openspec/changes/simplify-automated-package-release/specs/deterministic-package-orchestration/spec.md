@@ -15,6 +15,21 @@
 - **WHEN** 配置版本中存在多个匹配当前仓库的服务
 - **THEN** 系统 MUST 以 `SERVICE_TARGET_AMBIGUOUS` 结束任务且不得默认选择第一个服务
 
+### Requirement: 自动任务支持单服务与多服务融合打包
+打包平台 MUST 使用非空 `targets` 数组接收单服务或多服务打包目标；每个 `targets` 元素 MUST 包含 `repositoryUrl` 与 `branch`，且一次任务的所有服务 MUST 从任务创建时固化的同一个 `versionId` 中定位。
+
+#### Scenario: 多个服务属于配置版本
+- **WHEN** `targets` 中每个仓库都在配置版本中唯一匹配一个不同服务
+- **THEN** 系统 SHALL 固化全部服务及其目标分支，只提交一次底层打包请求，并在同一个 `modules` 数组中包含全部服务
+
+#### Scenario: 任一服务不属于配置版本
+- **WHEN** `targets` 中任一仓库无法在配置版本中唯一匹配服务
+- **THEN** 系统 MUST 终止整个任务且不得提交部分服务打包请求
+
+#### Scenario: 单服务调用方创建任务
+- **WHEN** 请求只需要打包一个服务
+- **THEN** 调用方 SHALL 提交只包含一个元素的 `targets`，系统不得接受顶层 `repositoryUrl` 或 `branch`
+
 ### Requirement: 自动打包任务异步创建并保持幂等
 打包平台 SHALL 提供异步自动任务创建和按 `packageTaskId` 精确查询能力；创建请求 MUST 使用 `clientRequestId` 持久化幂等，重复请求不得创建第二个包。
 
@@ -31,7 +46,7 @@
 - **THEN** 系统 SHALL 从持久化阶段幂等恢复，且不得重复创建打包或补偿上传
 
 ### Requirement: 同一版本服务任务持久化排队并独占执行
-打包平台 MUST 以 `versionId:serviceId` 为锁键对任务进行持久化 FIFO 排队，并 MUST 防止同一锁键的两个任务同时执行会读取或修改服务分支的阶段。
+打包平台 MUST 以 `versionId:serviceId` 为锁键对任务进行持久化 FIFO 排队，并 MUST 防止同一锁键的两个任务同时执行会读取或修改服务分支的阶段。多服务任务 MUST 原子获得全部目标服务锁或保持等待，不得仅持有部分服务锁。
 
 #### Scenario: 同一服务已有运行任务
 - **WHEN** 新任务与运行任务具有相同 `versionId:serviceId`
@@ -45,8 +60,12 @@
 - **WHEN** 打包平台重启时存在持锁任务和同键排队任务
 - **THEN** 系统 MUST 恢复唯一锁所有者并保持原 FIFO 顺序，不得并行恢复同键任务
 
+#### Scenario: 多服务任务与单服务任务锁集合相交
+- **WHEN** 多服务任务所需的任一服务锁已被其他任务持有
+- **THEN** 多服务任务 SHALL 等待且不得占用其余空闲服务锁；全部锁同时可用后才可进入分支校准
+
 ### Requirement: 打包平台自动校准服务分支
-持锁任务 MUST 验证目标 branch 存在，并在服务配置分支不一致时读取完整服务和目标 Git 配置、提交完整更新且重新查询验证；任务结束后 MUST 不得自动恢复原分支。
+持锁任务 MUST 依次验证每个目标 branch 存在，并在服务配置分支不一致时读取完整服务和目标 Git 配置、提交完整更新且重新查询验证；任一服务校准失败时不得开始打包，任务结束后 MUST 不得自动恢复原分支。
 
 #### Scenario: 服务分支已经一致
 - **WHEN** 服务当前配置分支等于请求目标分支

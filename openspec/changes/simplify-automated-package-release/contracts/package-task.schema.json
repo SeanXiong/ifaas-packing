@@ -25,12 +25,24 @@
     "createRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["clientRequestId", "repositoryUrl", "branch", "parameters"],
+      "required": ["clientRequestId", "targets", "parameters"],
       "properties": {
         "clientRequestId": {"type": "string", "minLength": 1},
-        "repositoryUrl": {"type": "string", "minLength": 1},
-        "branch": {"type": "string", "minLength": 1},
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/requestTarget"}
+        },
         "parameters": {"$ref": "#/$defs/packageParameters"}
+      }
+    },
+    "requestTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryUrl", "branch"],
+      "properties": {
+        "repositoryUrl": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1}
       }
     },
     "acceptedResponse": {
@@ -45,32 +57,60 @@
     "targetSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["projectId", "projectName", "versionId", "versionName", "serviceId", "serviceName", "gitUrl"],
+      "required": ["projectId", "projectName", "versionId", "versionName", "modules"],
       "properties": {
         "projectId": {"$ref": "#/$defs/identifier"},
         "projectName": {"type": "string", "minLength": 1},
         "versionId": {"$ref": "#/$defs/identifier"},
         "versionName": {"type": "string", "minLength": 1},
+        "modules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/targetModule"}
+        }
+      }
+    },
+    "targetModule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serviceId", "serviceName", "gitUrl", "branch"],
+      "properties": {
         "serviceId": {"$ref": "#/$defs/identifier"},
         "serviceName": {"type": "string", "minLength": 1},
-        "gitUrl": {"type": "string", "minLength": 1}
+        "gitUrl": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1}
       }
     },
     "queue": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["lockKey", "position"],
+      "required": ["position"],
+      "anyOf": [{"required": ["lockKey"]}, {"required": ["lockKeys", "positions"]}],
       "properties": {
-        "lockKey": {"type": "string", "minLength": 3},
+        "lockKey": {"type": ["string", "null"], "minLength": 3},
+        "lockKeys": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 3}},
         "position": {"type": "integer", "minimum": 0},
+        "positions": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
         "waitingSince": {"type": ["string", "null"], "format": "date-time"}
       }
     },
     "branchAlignment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["previousBranch", "targetBranch", "changed", "verified"],
+      "required": ["services", "changed", "verified"],
       "properties": {
+        "changed": {"type": "boolean"},
+        "verified": {"type": "boolean"},
+        "services": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/branchAlignmentItem"}}
+      }
+    },
+    "branchAlignmentItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serviceId", "serviceName", "previousBranch", "targetBranch", "changed", "verified"],
+      "properties": {
+        "serviceId": {"$ref": "#/$defs/identifier"},
+        "serviceName": {"type": "string", "minLength": 1},
         "previousBranch": {"type": ["string", "null"]},
         "targetBranch": {"type": "string", "minLength": 1},
         "changed": {"type": "boolean"},

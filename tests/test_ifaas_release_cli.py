@@ -25,6 +25,7 @@ def arguments(**changes):
         "cpu_architecture": "x86_64",
         "namespace": "ifaas",
         "upload_cloud": True,
+        "package_trigger": "AFTER_PIPELINE",
     }
     values.update(changes)
     return argparse.Namespace(**values)
@@ -38,6 +39,7 @@ class IfaasReleaseCliTests(unittest.TestCase):
         self.assertEqual(request["repositoryUrl"], "https://gitlab.example.com/team/service.git")
         self.assertEqual(request["branch"], "release/1.0")
         self.assertEqual(request["commitSha"], "a" * 40)
+        self.assertEqual(request["packageTrigger"], "AFTER_PIPELINE")
         self.assertTrue(request["clientRequestId"].startswith("codex-"))
 
     def test_same_release_intent_has_stable_client_request_id(self):
@@ -68,6 +70,17 @@ class IfaasReleaseCliTests(unittest.TestCase):
         ), patch.object(CLI.subprocess, "run") as run:
             with self.assertRaises(CLI.ReleaseError):
                 CLI.release(arguments(), {"branch": "main"})
+        run.assert_not_called()
+
+    def test_direct_release_dispatches_package_without_git_push(self):
+        with patch.object(CLI, "git_output", return_value=""), patch.object(
+            CLI, "register", return_value={"releaseTaskId": "rel-direct", "status": "PACKAGE_RUNNING"}
+        ), patch.object(CLI.subprocess, "run") as run:
+            result = CLI.release(
+                arguments(package_trigger="DIRECT"),
+                {"branch": "main", "packageTrigger": "DIRECT"},
+            )
+        self.assertEqual(result["status"], "PACKAGE_RUNNING")
         run.assert_not_called()
 
     def test_push_failure_is_reported(self):

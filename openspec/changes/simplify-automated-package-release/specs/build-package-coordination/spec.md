@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: 构建平台持久化精确发布任务
-构建平台 MUST 按 `clientRequestId` 幂等保存仓库、GitLab Project、branch、完整 Commit SHA 和打包参数，并 SHALL 在持久化完成后返回唯一 `releaseTaskId` 和 `READY_TO_PUSH`。
+构建平台 MUST 按 `clientRequestId` 幂等保存仓库、GitLab Project、branch、`packageTrigger`、`packageTargets` 和打包参数。`AFTER_PIPELINE` 还 MUST 保存完整 Commit SHA，并在持久化完成后返回唯一 `releaseTaskId` 和 `READY_TO_PUSH`；`DIRECT` SHALL 以 `CREATING_PACKAGE` 落库并立即下发打包。
 
 #### Scenario: 首次登记发布任务
 - **WHEN** Skill 提交完整有效的发布请求
@@ -12,7 +12,11 @@
 - **THEN** 构建平台 SHALL 返回原 `releaseTaskId` 且不得创建第二条发布工作流
 
 ### Requirement: 仅目标 Commit 构建成功触发打包
-构建平台 MUST 使用 GitLab Project、branch 和完整 Commit SHA 查找 Pipeline；其他 Commit 的成功 Pipeline MUST 不得触发当前发布任务。
+`AFTER_PIPELINE` 模式下，构建平台 MUST 使用 GitLab Project、branch 和完整 Commit SHA 查找 Pipeline；其他 Commit 的成功 Pipeline MUST 不得触发当前发布任务。`DIRECT` 模式 MUST 跳过 Pipeline 查询，并把全部 `packageTargets` 直接转换为打包平台 `targets`。
+
+#### Scenario: 直接创建融合打包任务
+- **WHEN** 发布任务使用 `DIRECT` 并包含多个 `packageTargets`
+- **THEN** 构建平台 SHALL 在任务落库后只创建一次打包任务，并完整传递所有目标服务
 
 #### Scenario: 目标 Commit 构建成功
 - **WHEN** 目标 Commit SHA 对应 Pipeline 进入成功状态

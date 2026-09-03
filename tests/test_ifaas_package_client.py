@@ -94,7 +94,14 @@ class SystemBClientTest(unittest.TestCase):
         self.assertEqual(update[3]["branch"], "rel_2.0.3")
 
     def test_automation_task_contract(self):
-        created = self.client.create_package_task({"clientRequestId": "release-1"})
+        created = self.client.create_package_task({
+            "clientRequestId": "release-1",
+            "targets": [{"repositoryUrl": "git@gitlab:team/service.git", "branch": "main"}],
+            "parameters": {
+                "packageType": "UPGRADE", "networkType": "OFFLINE",
+                "cpuArchitecture": "x86_64", "namespace": "ifaas", "uploadCloud": True,
+            },
+        })
         self.assertEqual(created["packageTaskId"], "pkg-1")
         task = self.client.get_package_task("pkg-1")
         self.assertEqual(task["artifact"]["cloudUrl"], "https://pan/a")

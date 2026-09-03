@@ -85,7 +85,7 @@ Codex 完成本地检查与 commit 后，先调用构建平台注册 `releaseTas
 
 ### 在固定版本中按 Git URL 确定性发现服务
 
-打包平台读取任务 `repositoryUrl`，与配置版本下每个服务的 `git_url` 规范化后精确比较，兼容 HTTP、HTTPS、SSH 和 `.git` 后缀差异。服务名称相似度不参与选择。
+打包平台读取任务 `targets` 中每个 `repositoryUrl`，与配置版本下每个服务的 `git_url` 规范化后精确比较，兼容 HTTP、HTTPS、SSH 和 `.git` 后缀差异。服务名称相似度不参与选择。
 
 匹配结果必须为唯一服务：零个返回 `SERVICE_NOT_FOUND`，多个返回 `SERVICE_TARGET_AMBIGUOUS`。任务保存解析后的项目、版本、服务和 Git 快照，后续不因设置变化重新选目标。
 

@@ -100,8 +100,9 @@ class RunnerClient(FakeClient):
 def valid_request(client_request_id="release-1"):
     return {
         "clientRequestId": client_request_id,
-        "repositoryUrl": "git@gitlab:team/service.git",
-        "branch": "release/1.0",
+        "targets": [
+            {"repositoryUrl": "git@gitlab:team/service.git", "branch": "release/1.0"}
+        ],
         "parameters": {
             "packageType": "UPGRADE",
             "networkType": "OFFLINE",
@@ -109,6 +110,23 @@ def valid_request(client_request_id="release-1"):
             "namespace": "ifaas",
             "uploadCloud": True,
         },
+    }
+
+
+def multi_target_request(client_request_id="combined-release"):
+    request = valid_request(client_request_id)
+    request["targets"].append(
+        {"repositoryUrl": "https://gitlab/team/console.git", "branch": "release/1.0"}
+    )
+    return request
+
+
+def add_second_service(client):
+    client.list_services = lambda _version_id: {
+        "services": [
+            {"serviceId": 31, "name": "服务甲", "gitUrl": "https://gitlab/team/service.git", "branch": client.branch},
+            {"serviceId": 32, "name": "控制台", "gitUrl": "https://gitlab/team/console.git", "branch": client.branch},
+        ]
     }
 
 
@@ -210,11 +228,30 @@ class PackageTaskTests(unittest.TestCase):
             self.service.create(request)
         self.assertEqual(raised.exception.code, "INVALID_CPU_ARCHITECTURE")
 
+    def test_accepts_targets_and_rejects_legacy_or_duplicate_target_formats(self):
+        response, created = self.service.create(multi_target_request())
+        self.assertTrue(created)
+        self.assertEqual(response["status"], "ACCEPTED")
+
+        legacy = valid_request("legacy")
+        legacy.pop("targets")
+        legacy["repositoryUrl"] = "git@gitlab:team/service.git"
+        legacy["branch"] = "release/1.0"
+        with self.assertRaises(PackageTaskError) as raised:
+            self.service.create(legacy)
+        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+
+        duplicate = multi_target_request("duplicate")
+        duplicate["targets"][1]["repositoryUrl"] = "https://gitlab/team/service.git"
+        with self.assertRaises(PackageTaskError) as raised:
+            self.service.create(duplicate)
+        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+
     def test_locates_unique_service_by_normalized_git_url(self):
         response, _ = self.service.create(valid_request())
         target = self.service.locate_target(response["packageTaskId"], self.client)
-        self.assertEqual(target["serviceId"], 31)
-        self.assertEqual(self.service.get(response["packageTaskId"])["target"]["serviceName"], "服务甲")
+        self.assertEqual(target["modules"][0]["serviceId"], 31)
+        self.assertEqual(self.service.get(response["packageTaskId"])["target"]["modules"][0]["serviceName"], "服务甲")
 
     def test_missing_and_ambiguous_service_fail_with_stable_errors(self):
         response, _ = self.service.create(valid_request("missing-service"))
@@ -234,6 +271,14 @@ class PackageTaskTests(unittest.TestCase):
         with self.assertRaises(PackageTaskError) as ambiguous:
             self.service.locate_target(response["packageTaskId"], self.client)
         self.assertEqual(ambiguous.exception.code, "SERVICE_TARGET_AMBIGUOUS")
+
+    def test_locates_all_targets_in_configured_version(self):
+        add_second_service(self.client)
+        response, _ = self.service.create(multi_target_request())
+        target = self.service.locate_target(response["packageTaskId"], self.client)
+        self.assertEqual(target["versionId"], 11)
+        self.assertEqual([item["serviceId"] for item in target["modules"]], [31, 32])
+        self.assertNotIn("serviceId", target)
 
     def test_fifo_queue_hands_lock_to_only_the_next_task(self):
         task_ids = []
@@ -262,26 +307,44 @@ class PackageTaskTests(unittest.TestCase):
         self.assertCountEqual(self.store.repair_queues(), owners)
         self.assertNotIn("orphan", self.store.load()["locks"])
 
+    def test_multi_service_lock_is_acquired_and_released_atomically(self):
+        add_second_service(self.client)
+        blocker = self._create_owned_task("blocker")
+
+        response, _ = self.service.create(multi_target_request("multi-waiter"))
+        multi_id = response["packageTaskId"]
+        target = self.service.locate_target(multi_id, self.client)
+        lock_keys = [f"11:{item['serviceId']}" for item in target["modules"]]
+        queued = self.store.enqueue_many(multi_id, lock_keys)
+        self.assertFalse(queued["acquired"])
+        self.assertFalse(self.store.owns_lock(multi_id, "11:32"))
+
+        self.assertEqual(self.store.release(blocker, "11:31"), multi_id)
+        self.assertTrue(self.store.owns_locks(multi_id, ["11:31", "11:32"]))
+        self.assertEqual(self.service.get(multi_id)["queue"]["lockKeys"], ["11:31", "11:32"])
+
     def _create_owned_task(self, client_id):
         response, _ = self.service.create(valid_request(client_id))
         task_id = response["packageTaskId"]
         target = self.service.locate_target(task_id, self.client)
-        self.store.enqueue(task_id, f"{target['versionId']}:{target['serviceId']}")
+        self.store.enqueue(task_id, f"{target['versionId']}:{target['modules'][0]['serviceId']}")
         return task_id
 
     def test_branch_alignment_skips_matching_branch_and_records_result(self):
         self.client.branch = "release/1.0"
         task_id = self._create_owned_task("aligned")
         result = self.service.align_branch(task_id, self.client)
-        self.assertFalse(result["changed"])
+        service = result["services"][0]
+        self.assertFalse(service["changed"])
         self.assertTrue(result["verified"])
-        self.assertEqual(result["previousBranch"], "release/1.0")
+        self.assertEqual(service["previousBranch"], "release/1.0")
 
     def test_branch_alignment_switches_and_does_not_restore(self):
         task_id = self._create_owned_task("switch")
         result = self.service.align_branch(task_id, self.client)
+        service = result["services"][0]
         self.assertTrue(result["changed"])
-        self.assertEqual(result["previousBranch"], "main")
+        self.assertEqual(service["previousBranch"], "main")
         self.assertEqual(self.client.branch, "release/1.0")
 
     def test_branch_alignment_fails_for_missing_branch_and_update_error(self):
@@ -367,6 +430,18 @@ class PackageTaskWorkerTests(unittest.TestCase):
         self.assertTrue(payload["seafile"])
         self.assertEqual(payload["modules"][0]["pk"], 31)
 
+    def test_multiple_targets_submit_one_combined_package(self):
+        add_second_service(self.client)
+        result = self._run(multi_target_request())
+        self.assertEqual(result["status"], "SUCCESS")
+        self.assertEqual(len(self.client.submissions), 1)
+        package_type, version_id, payload = self.client.submissions[0]
+        self.assertEqual(package_type, "UPGRADE")
+        self.assertEqual(version_id, 11)
+        self.assertEqual([item["pk"] for item in payload["modules"]], [31, 32])
+        self.assertEqual([item["ref_name"] for item in payload["modules"]], ["release/1.0", "release/1.0"])
+        self.assertEqual(len(result["branchAlignment"]["services"]), 2)
+
     def test_delayed_record_and_no_cloud_request_succeed(self):
         self.client.cloud_on_submit = False
         self.client.delay_after_submit = 1
@@ -405,7 +480,7 @@ class PackageTaskWorkerTests(unittest.TestCase):
         response, _ = self.service.create(valid_request("package-restart"))
         task_id = response["packageTaskId"]
         target = self.service.locate_target(task_id, self.client)
-        self.store.enqueue(task_id, f"{target['versionId']}:{target['serviceId']}")
+        self.store.enqueue(task_id, f"{target['versionId']}:{target['modules'][0]['serviceId']}")
         self.service.align_branch(task_id, self.client)
         self.store.transition(
             task_id,
@@ -436,7 +511,8 @@ class PackageTaskWorkerTests(unittest.TestCase):
         response, _ = self.service.create(valid_request("cloud-restart"))
         task_id = response["packageTaskId"]
         target = self.service.locate_target(task_id, self.client)
-        self.store.enqueue(task_id, f"{target['versionId']}:{target['serviceId']}")
+        lock_key = f"{target['versionId']}:{target['modules'][0]['serviceId']}"
+        self.store.enqueue(task_id, lock_key)
         self.service.align_branch(task_id, self.client)
         self.store.transition(task_id, "PACKAGING_AND_UPLOADING")
         self.store.transition(
@@ -453,7 +529,7 @@ class PackageTaskWorkerTests(unittest.TestCase):
                 }
             },
         )
-        self.store.release(task_id, f"{target['versionId']}:{target['serviceId']}")
+        self.store.release(task_id, lock_key)
         self.store.transition(
             task_id,
             "RECOVERING_CLOUD_UPLOAD",

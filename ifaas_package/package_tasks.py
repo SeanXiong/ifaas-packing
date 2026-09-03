@@ -134,6 +134,16 @@ class PackageTaskStore:
     def enqueue(self, task_id: str, lock_key: str) -> dict:
         """把已定位任务加入持久化 FIFO，并为队首分配独占锁。"""
 
+        result = self.enqueue_many(task_id, [lock_key])
+        return {
+            "acquired": result["acquired"],
+            "position": result["position"],
+            "lockKey": lock_key,
+        }
+
+    def enqueue_many(self, task_id: str, lock_keys: "list[str]") -> dict:
+        """把任务原子加入多个服务队列，仅在全部队首可用时一次性持有全部锁。"""
+
         with self._lock:
             database = self._load_unlocked()
             task = database["tasks"].get(task_id)
@@ -141,40 +151,63 @@ class PackageTaskStore:
                 raise PackageTaskError("PACKAGE_TASK_NOT_FOUND", "自动打包任务不存在。", 404)
             if task["stage"] not in {"LOCATING_TARGET", "QUEUED"} or not task.get("target"):
                 raise PackageTaskError("PACKAGE_TASK_STAGE_CONFLICT", "当前任务不能进入服务队列。", 409)
-            queue = database["queues"].setdefault(lock_key, [])
-            if task_id not in queue:
-                queue.append(task_id)
-            owner = database["locks"].get(lock_key)
-            if owner not in queue:
-                database["locks"][lock_key] = queue[0]
-            self._refresh_queue_unlocked(database, lock_key)
+            normalized_keys = sorted({str(item) for item in lock_keys if item not in (None, "")})
+            if not normalized_keys:
+                raise PackageTaskError("PACKAGE_TASK_STAGE_CONFLICT", "任务缺少服务锁。", 409)
+            waiting_since = (task.get("queue") or {}).get("waitingSince") or _timestamp()
+            task["queue"] = {
+                "lockKey": normalized_keys[0] if len(normalized_keys) == 1 else None,
+                "lockKeys": normalized_keys,
+                "position": 0,
+                "positions": {},
+                "waitingSince": waiting_since,
+            }
+            for lock_key in normalized_keys:
+                queue = database["queues"].setdefault(lock_key, [])
+                if task_id not in queue:
+                    queue.append(task_id)
+            self._promote_waiters_unlocked(database)
+            self._refresh_queues_unlocked(database)
             self._write_unlocked(database)
             return {
-                "acquired": database["locks"][lock_key] == task_id,
-                "position": queue.index(task_id),
-                "lockKey": lock_key,
+                "acquired": self._owns_locks_unlocked(database, task_id, normalized_keys),
+                "position": max(database["queues"][key].index(task_id) for key in normalized_keys),
+                "lockKeys": normalized_keys,
             }
 
     def release(self, task_id: str, lock_key: str) -> "str | None":
         """释放当前所有者，只把锁交给同键 FIFO 的下一个任务。"""
 
+        next_task_ids = self.release_many(task_id, [lock_key])
+        return next_task_ids[0] if next_task_ids else None
+
+    def release_many(self, task_id: str, lock_keys: "list[str]") -> "list[str]":
+        """原子释放任务持有的全部服务锁，并返回新获得完整锁集合的任务。"""
+
         with self._lock:
             database = self._load_unlocked()
-            if database["locks"].get(lock_key) != task_id:
+            normalized_keys = sorted({str(item) for item in lock_keys if item not in (None, "")})
+            task = database["tasks"].get(task_id)
+            task_lock_keys = sorted(self._task_lock_keys(task or {}))
+            if normalized_keys != task_lock_keys or not self._owns_locks_unlocked(database, task_id, normalized_keys):
                 raise PackageTaskError("PACKAGE_TASK_LOCK_NOT_OWNED", "当前任务不是服务锁所有者。", 409)
-            queue = database["queues"].get(lock_key, [])
-            database["queues"][lock_key] = [item for item in queue if item != task_id]
-            remaining = database["queues"][lock_key]
-            if remaining:
-                database["locks"][lock_key] = remaining[0]
-                self._refresh_queue_unlocked(database, lock_key)
-                next_task_id = remaining[0]
-            else:
-                database["queues"].pop(lock_key, None)
+            previous_owners = set(database["locks"].values())
+            for lock_key in normalized_keys:
+                queue = database["queues"].get(lock_key, [])
+                remaining = [item for item in queue if item != task_id]
                 database["locks"].pop(lock_key, None)
-                next_task_id = None
+                if remaining:
+                    database["queues"][lock_key] = remaining
+                else:
+                    database["queues"].pop(lock_key, None)
+            self._promote_waiters_unlocked(database)
+            self._refresh_queues_unlocked(database)
+            next_task_ids = sorted(
+                set(database["locks"].values()) - previous_owners,
+                key=lambda item: database["tasks"][item]["createdAt"],
+            )
             self._write_unlocked(database)
-            return next_task_id
+            return next_task_ids
 
     def repair_queues(self) -> "list[str]":
         """移除终态/缺失任务和孤儿锁，并恢复每个队列唯一所有者。"""
@@ -193,17 +226,19 @@ class PackageTaskStore:
                     database["locks"].pop(lock_key, None)
                     continue
                 database["queues"][lock_key] = valid
-                database["locks"][lock_key] = valid[0]
-                self._refresh_queue_unlocked(database, lock_key)
-            for lock_key in list(database["locks"]):
-                if lock_key not in database["queues"]:
-                    database["locks"].pop(lock_key, None)
+            database["locks"] = {}
+            self._promote_waiters_unlocked(database)
+            self._refresh_queues_unlocked(database)
             self._write_unlocked(database)
-            return list(database["locks"].values())
+            return list(dict.fromkeys(database["locks"].values()))
 
     def owns_lock(self, task_id: str, lock_key: str) -> bool:
+        return self.owns_locks(task_id, [lock_key])
+
+    def owns_locks(self, task_id: str, lock_keys: "list[str]") -> bool:
         with self._lock:
-            return self._load_unlocked()["locks"].get(lock_key) == task_id
+            database = self._load_unlocked()
+            return self._owns_locks_unlocked(database, task_id, lock_keys)
 
     def non_terminal(self) -> "list[dict]":
         with self._lock:
@@ -243,20 +278,58 @@ class PackageTaskStore:
         return data
 
     @staticmethod
-    def _refresh_queue_unlocked(database: dict, lock_key: str) -> None:
-        queue = database["queues"].get(lock_key, [])
+    def _task_lock_keys(task: dict) -> "list[str]":
+        queue = task.get("queue") or {}
+        lock_keys = queue.get("lockKeys")
+        if isinstance(lock_keys, list) and lock_keys:
+            return [str(item) for item in lock_keys]
+        lock_key = str(queue.get("lockKey") or "")
+        return [lock_key] if lock_key else []
+
+    @staticmethod
+    def _owns_locks_unlocked(database: dict, task_id: str, lock_keys: "list[str]") -> bool:
+        return bool(lock_keys) and all(database["locks"].get(key) == task_id for key in lock_keys)
+
+    @classmethod
+    def _promote_waiters_unlocked(cls, database: dict) -> None:
+        candidates = sorted(database["tasks"].values(), key=lambda item: item["createdAt"])
+        for task in candidates:
+            task_id = task["packageTaskId"]
+            lock_keys = cls._task_lock_keys(task)
+            if not lock_keys or task["stage"] in TERMINAL_STAGES:
+                continue
+            if cls._owns_locks_unlocked(database, task_id, lock_keys):
+                continue
+            is_front = all(database["queues"].get(key, [None])[0] == task_id for key in lock_keys)
+            all_free = all(database["locks"].get(key) in {None, task_id} for key in lock_keys)
+            if is_front and all_free:
+                for lock_key in lock_keys:
+                    database["locks"][lock_key] = task_id
+
+    @classmethod
+    def _refresh_queues_unlocked(cls, database: dict) -> None:
         timestamp = _timestamp()
-        for position, task_id in enumerate(queue):
+        queued_task_ids = {task_id for queue in database["queues"].values() for task_id in queue}
+        for task_id in queued_task_ids:
             task = database["tasks"][task_id]
             waiting_since = (task.get("queue") or {}).get("waitingSince") or timestamp
+            lock_keys = cls._task_lock_keys(task)
+            positions = {
+                key: database["queues"].get(key, []).index(task_id)
+                for key in lock_keys
+                if task_id in database["queues"].get(key, [])
+            }
+            acquired = cls._owns_locks_unlocked(database, task_id, lock_keys)
             if task["stage"] in {"LOCATING_TARGET", "QUEUED"}:
                 task["stage"] = "QUEUED"
                 task["status"] = "RUNNING"
                 task["progress"] = STAGE_PROGRESS["QUEUED"]
             task["queue"] = {
-                "lockKey": lock_key,
-                "position": position,
-                "waitingSince": None if position == 0 else waiting_since,
+                "lockKey": lock_keys[0] if len(lock_keys) == 1 else None,
+                "lockKeys": lock_keys,
+                "position": max(positions.values(), default=0),
+                "positions": positions,
+                "waitingSince": None if acquired else waiting_since,
             }
             task["updatedAt"] = timestamp
 
@@ -351,7 +424,7 @@ class PackageTaskService:
             queue = task.get("queue") or {}
             if (
                 task["stage"] in {"QUEUED", "ALIGNING_BRANCH", "PACKAGING_AND_UPLOADING"}
-                and queue.get("lockKey")
+                and _queue_lock_keys(queue)
                 and task["packageTaskId"] not in owners
             ):
                 continue
@@ -362,7 +435,7 @@ class PackageTaskService:
         return task_ids
 
     def locate_target(self, task_id: str, client) -> dict:
-        """按任务创建时的版本快照和规范化 Git URL 唯一定位服务。"""
+        """按任务创建时的版本快照和规范化 Git URL 唯一定位全部服务。"""
 
         task = self.store.get(task_id)
         if task is None:
@@ -378,37 +451,52 @@ class PackageTaskService:
 
         request = task["requestSnapshot"]
         configuration = task["configurationSnapshot"]
-        repository_key = normalize_git_url(request["repositoryUrl"])
         services = client.list_services(configuration["versionId"]).get("services", [])
-        matches = [
-            service
-            for service in services
-            if normalize_git_url(str(service.get("gitUrl") or "")) == repository_key
-        ]
-        if len(matches) != 1:
-            code = "SERVICE_NOT_FOUND" if not matches else "SERVICE_TARGET_AMBIGUOUS"
-            message = "配置产品中不存在与当前仓库匹配的服务。" if not matches else "配置产品中存在多个与当前仓库匹配的服务。"
+        modules = []
+        for requested_target in request["targets"]:
+            repository_key = normalize_git_url(requested_target["repositoryUrl"])
+            matches = [
+                service
+                for service in services
+                if normalize_git_url(str(service.get("gitUrl") or "")) == repository_key
+            ]
+            if len(matches) != 1:
+                code = "SERVICE_NOT_FOUND" if not matches else "SERVICE_TARGET_AMBIGUOUS"
+                message = "配置产品中不存在与请求仓库匹配的服务。" if not matches else "配置产品中存在多个与请求仓库匹配的服务。"
+                self.store.transition(
+                    task_id,
+                    "FAILED",
+                    {
+                        "error": {
+                            "stage": "LOCATING_TARGET",
+                            "code": code,
+                            "message": message,
+                            "retryable": False,
+                            "details": {"repositoryUrl": requested_target["repositoryUrl"]},
+                        }
+                    },
+                )
+                raise PackageTaskError(code, message, 409)
+            service = matches[0]
+            modules.append(
+                {
+                    "serviceId": service["serviceId"],
+                    "serviceName": str(service.get("name") or service["serviceId"]),
+                    "gitUrl": str(service.get("gitUrl") or requested_target["repositoryUrl"]),
+                    "branch": requested_target["branch"],
+                }
+            )
+
+        if len({str(module["serviceId"]) for module in modules}) != len(modules):
+            message = "targets 中存在映射到同一服务的重复仓库。"
             self.store.transition(
                 task_id,
                 "FAILED",
-                {
-                    "error": {
-                        "stage": "LOCATING_TARGET",
-                        "code": code,
-                        "message": message,
-                        "retryable": False,
-                    }
-                },
+                {"error": {"stage": "LOCATING_TARGET", "code": "DUPLICATE_SERVICE_TARGET", "message": message, "retryable": False}},
             )
-            raise PackageTaskError(code, message, 409)
+            raise PackageTaskError("DUPLICATE_SERVICE_TARGET", message, 409)
 
-        service = matches[0]
-        target = {
-            **configuration,
-            "serviceId": service["serviceId"],
-            "serviceName": str(service.get("name") or service["serviceId"]),
-            "gitUrl": str(service.get("gitUrl") or request["repositoryUrl"]),
-        }
+        target = {**configuration, "modules": modules}
         self.store.transition(task_id, "LOCATING_TARGET", {"target": target})
         return copy.deepcopy(target)
 
@@ -419,28 +507,37 @@ class PackageTaskService:
         if task is None:
             raise PackageTaskError("PACKAGE_TASK_NOT_FOUND", "自动打包任务不存在。", 404)
         queue = task.get("queue") or {}
-        lock_key = str(queue.get("lockKey") or "")
-        if task["stage"] not in {"QUEUED", "ALIGNING_BRANCH"} or not lock_key or not self.store.owns_lock(task_id, lock_key):
+        lock_keys = _queue_lock_keys(queue)
+        if task["stage"] not in {"QUEUED", "ALIGNING_BRANCH"} or not self.store.owns_locks(task_id, lock_keys):
             raise PackageTaskError("PACKAGE_TASK_LOCK_NOT_OWNED", "任务尚未获得服务锁。", 409)
         if task["stage"] == "QUEUED":
             task = self.store.transition(task_id, "ALIGNING_BRANCH")
         target = task["target"]
-        branch = task["requestSnapshot"]["branch"]
+        modules = _target_modules(target)
         try:
-            refs = client.list_refs(target["gitUrl"])
-            if branch not in refs.get("branches", []):
-                raise SystemBError("TARGET_BRANCH_NOT_FOUND", "目标 branch 不存在。", 404)
-            result = client.switch_service_branch(
-                target["versionId"], target["serviceId"], branch
-            )
+            alignments = []
+            for module in modules:
+                branch = module["branch"]
+                refs = client.list_refs(module["gitUrl"])
+                if branch not in refs.get("branches", []):
+                    raise SystemBError("TARGET_BRANCH_NOT_FOUND", f"服务 {module['serviceName']} 的目标 branch 不存在。", 404)
+                result = client.switch_service_branch(target["versionId"], module["serviceId"], branch)
+                item = {
+                    "serviceId": module["serviceId"],
+                    "serviceName": module["serviceName"],
+                    "previousBranch": result.get("previousBranch"),
+                    "targetBranch": branch,
+                    "changed": bool(result.get("changed")),
+                    "verified": result.get("currentBranch") == branch,
+                }
+                if not item["verified"]:
+                    raise SystemBError("BRANCH_UPDATE_NOT_APPLIED", f"服务 {module['serviceName']} 分支修改后验证失败。")
+                alignments.append(item)
             alignment = {
-                "previousBranch": result.get("previousBranch"),
-                "targetBranch": branch,
-                "changed": bool(result.get("changed")),
-                "verified": result.get("currentBranch") == branch,
+                "services": alignments,
+                "changed": any(item["changed"] for item in alignments),
+                "verified": all(item["verified"] for item in alignments),
             }
-            if not alignment["verified"]:
-                raise SystemBError("BRANCH_UPDATE_NOT_APPLIED", "服务分支修改后验证失败。")
         except SystemBError as error:
             message = f"服务分支校准失败：{error.message}"
             self.store.transition(
@@ -456,9 +553,10 @@ class PackageTaskService:
                     }
                 },
             )
-            next_task_id = self.store.release(task_id, lock_key)
-            if next_task_id and self.submit is not None:
-                self.submit(next_task_id)
+            next_task_ids = self.store.release_many(task_id, lock_keys)
+            if self.submit is not None:
+                for next_task_id in next_task_ids:
+                    self.submit(next_task_id)
             raise PackageTaskError("BRANCH_ALIGNMENT_FAILED", message, 409) from error
         self.store.transition(task_id, "ALIGNING_BRANCH", {"branchAlignment": alignment})
         return copy.deepcopy(alignment)
@@ -496,14 +594,16 @@ class PackageTaskWorker:
                         self.service.locate_target(task_id, self.client)
                         continue
                     target = task["target"]
-                    queued = self.store.enqueue(
-                        task_id, f"{target['versionId']}:{target['serviceId']}"
-                    )
+                    lock_keys = [
+                        f"{target['versionId']}:{module['serviceId']}"
+                        for module in _target_modules(target)
+                    ]
+                    queued = self.store.enqueue_many(task_id, lock_keys)
                     if not queued["acquired"]:
                         return
                 elif stage == "QUEUED":
                     queue = task.get("queue") or {}
-                    if not self.store.owns_lock(task_id, str(queue.get("lockKey") or "")):
+                    if not self.store.owns_locks(task_id, _queue_lock_keys(queue)):
                         return
                     self.service.align_branch(task_id, self.client)
                 elif stage == "ALIGNING_BRANCH":
@@ -545,11 +645,12 @@ class PackageTaskWorker:
                 "modules": [
                     {
                         "need_apollo": True,
-                        "ref_name": request["branch"],
-                        "pk": target["serviceId"],
-                        "name": target["serviceName"],
-                        "custom_name": target["serviceName"],
+                        "ref_name": module["branch"],
+                        "pk": module["serviceId"],
+                        "name": module["serviceName"],
+                        "custom_name": module["serviceName"],
                     }
+                    for module in _target_modules(target)
                 ],
                 "offline": 1 if offline else 0,
                 "support_cpu": parameters["cpuArchitecture"],
@@ -694,11 +795,12 @@ class PackageTaskWorker:
     def _release_and_wake(self, task_id: str) -> None:
         task = self.store.get(task_id)
         queue = (task or {}).get("queue") or {}
-        lock_key = str(queue.get("lockKey") or "")
-        if lock_key and self.store.owns_lock(task_id, lock_key):
-            next_task_id = self.store.release(task_id, lock_key)
-            if next_task_id and self.service.submit is not None:
-                self.service.submit(next_task_id)
+        lock_keys = _queue_lock_keys(queue)
+        if lock_keys and self.store.owns_locks(task_id, lock_keys):
+            next_task_ids = self.store.release_many(task_id, lock_keys)
+            if self.service.submit is not None:
+                for next_task_id in next_task_ids:
+                    self.service.submit(next_task_id)
 
     def _fail(self, task_id: str, code: str, message: str, retryable: bool) -> None:
         task = self.store.get(task_id)
@@ -716,15 +818,33 @@ class PackageTaskWorker:
 def _validated_request(payload: object) -> dict:
     if not isinstance(payload, dict):
         raise PackageTaskError("INVALID_REQUEST", "请求体不是有效 JSON 对象。")
-    allowed = {"clientRequestId", "repositoryUrl", "branch", "parameters"}
+    allowed = {"clientRequestId", "targets", "parameters"}
     if set(payload) - allowed:
         raise PackageTaskError("INVALID_REQUEST", "自动打包请求包含未知字段。")
-    request = {key: copy.deepcopy(payload.get(key)) for key in allowed}
-    for key in ("clientRequestId", "repositoryUrl", "branch"):
-        if not isinstance(request[key], str) or not request[key].strip():
-            raise PackageTaskError("INVALID_REQUEST", f"{key} 不能为空。")
-        request[key] = request[key].strip()
-    parameters = request["parameters"]
+    request = {key: copy.deepcopy(payload.get(key)) for key in payload}
+    client_request_id = request.get("clientRequestId")
+    if not isinstance(client_request_id, str) or not client_request_id.strip():
+        raise PackageTaskError("INVALID_REQUEST", "clientRequestId 不能为空。")
+    request["clientRequestId"] = client_request_id.strip()
+    targets = request.get("targets")
+    if not isinstance(targets, list) or not targets:
+        raise PackageTaskError("INVALID_REQUEST", "targets 必须是非空数组。")
+    normalized_targets = []
+    for index, target in enumerate(targets):
+        if not isinstance(target, dict) or set(target) != {"repositoryUrl", "branch"}:
+            raise PackageTaskError("INVALID_REQUEST", f"targets[{index}] 字段不完整或包含未知字段。")
+        normalized_target = {}
+        for key in ("repositoryUrl", "branch"):
+            value = target.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise PackageTaskError("INVALID_REQUEST", f"targets[{index}].{key} 不能为空。")
+            normalized_target[key] = value.strip()
+        normalized_targets.append(normalized_target)
+    repository_keys = [normalize_git_url(item["repositoryUrl"]) for item in normalized_targets]
+    if len(set(repository_keys)) != len(repository_keys):
+        raise PackageTaskError("INVALID_REQUEST", "targets 不能包含重复仓库。")
+    request["targets"] = normalized_targets
+    parameters = request.get("parameters")
     if not isinstance(parameters, dict):
         raise PackageTaskError("INVALID_PACKAGE_PARAMETERS", "打包参数无效。")
     expected = {"packageType", "networkType", "cpuArchitecture", "namespace", "uploadCloud"}
@@ -745,6 +865,18 @@ def _validated_request(payload: object) -> dict:
         raise PackageTaskError("ONLINE_CLOUD_UPLOAD_NOT_SUPPORTED", "在线包不支持上传云盘。")
     request["parameters"] = copy.deepcopy(parameters)
     return request
+
+
+def _target_modules(target: dict) -> "list[dict]":
+    return copy.deepcopy(target["modules"])
+
+
+def _queue_lock_keys(queue: dict) -> "list[str]":
+    lock_keys = queue.get("lockKeys")
+    if isinstance(lock_keys, list) and lock_keys:
+        return [str(item) for item in lock_keys]
+    lock_key = str(queue.get("lockKey") or "")
+    return [lock_key] if lock_key else []
 
 
 def _timestamp(now: "datetime | None" = None) -> str:

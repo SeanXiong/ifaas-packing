@@ -75,6 +75,7 @@ def build_request(args: argparse.Namespace) -> dict:
         "repositoryUrl": normalize_git_url(remote),
         "branch": branch,
         "commitSha": commit_sha,
+        "packageTrigger": args.package_trigger,
         "parameters": parameters,
     }
     canonical = json.dumps(request, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -116,11 +117,16 @@ def request_json(method: str, url: str, token: str, payload: dict) -> dict:
 def register(request: dict) -> dict:
     base_url, token = platform_config()
     response = request_json("POST", f"{base_url}/api/release-tasks", token, request)
-    if response.get("status") != "READY_TO_PUSH" or not response.get("releaseTaskId"):
-        raise ReleaseError("构建平台未返回 READY_TO_PUSH 或 releaseTaskId，禁止 push。")
+    expected_statuses = (
+        {"CREATING_PACKAGE", "PACKAGE_RUNNING"}
+        if request.get("packageTrigger") == "DIRECT"
+        else {"READY_TO_PUSH"}
+    )
+    if response.get("status") not in expected_statuses or not response.get("releaseTaskId"):
+        raise ReleaseError("构建平台未返回预期状态或 releaseTaskId。")
     return {
         "releaseTaskId": str(response["releaseTaskId"]),
-        "status": "READY_TO_PUSH",
+        "status": str(response["status"]),
     }
 
 
@@ -129,6 +135,8 @@ def release(args: argparse.Namespace, request: dict) -> dict:
     if git_output(repository, "status", "--porcelain"):
         raise ReleaseError("工作区仍有未提交修改，请完成检查和 commit 后重试。")
     registered = register(request)
+    if request.get("packageTrigger") == "DIRECT":
+        return registered
     result = subprocess.run(
         ["git", "push", args.remote, request["branch"]],
         cwd=repository,
@@ -161,6 +169,9 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--cpu-architecture", choices=("x86_64", "aarch64"), required=True)
     value.add_argument("--namespace", required=True)
     value.add_argument("--upload-cloud", action="store_true")
+    value.add_argument(
+        "--package-trigger", choices=("DIRECT", "AFTER_PIPELINE"), default="AFTER_PIPELINE"
+    )
     return value
 
 
